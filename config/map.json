@@ -1,0 +1,18 @@
+{
+  "nodes": {
+    "start":  {"label": "起点",   "x":   0, "y":   0},
+    "junc1":  {"label": "路口1",  "x": 200, "y":   0},
+    "junc2":  {"label": "路口2",  "x": 200, "y": 180},
+    "zoneA":  {"label": "A区",    "x": 350, "y":   0},
+    "zoneB":  {"label": "B区",    "x": 200, "y": 350},
+    "zoneC":  {"label": "C区",    "x":   0, "y": 180}
+  },
+  "edges": [
+    {"from": "start", "to": "junc1", "dist_cm": 200},
+    {"from": "junc1", "to": "zoneA", "dist_cm": 150},
+    {"from": "junc1", "to": "junc2", "dist_cm": 180},
+    {"from": "junc2", "to": "zoneB", "dist_cm": 170},
+    {"from": "junc2", "to": "zoneC", "dist_cm": 200},
+    {"from": "start", "to": "zoneC", "dist_cm": 180}
+  ]
+}
