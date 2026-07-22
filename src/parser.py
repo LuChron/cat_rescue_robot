@@ -54,6 +54,19 @@ ZONE_KEYWORDS: dict[str, str] = {
     "zonee":      "zoneE",
     "e区":        "zoneE",
     "e zone":     "zoneE",
+    "zone f":     "zoneF",
+    "zonef":      "zoneF",
+    "f区":        "zoneF",
+    "f zone":     "zoneF",
+    "zone g":     "zoneG",
+    "zoneg":      "zoneG",
+    "g区":        "zoneG",
+    "g zone":     "zoneG",
+    "zone h":     "zoneH",
+    "zoneh":      "zoneH",
+    "h区":        "zoneH",
+    "h zone":     "zoneH",
+    "茶水间":     "zoneH",
     "start":      "start",
     "起点":       "start",
     "junction 1": "junc1",
@@ -78,8 +91,8 @@ ACTION_KEYWORDS: dict[str, List[str]] = {
 }
 
 
-def parse_command(text: str) -> dict:
-    """将文字解析为 {breed, zone, actions}。"""
+def _parse_keyword(text: str) -> dict:
+    """关键词匹配解析。"""
     text_lower = text.lower()
 
     # 匹配品种
@@ -107,12 +120,30 @@ def parse_command(text: str) -> dict:
     if not actions:
         actions = ["rescue"]
 
-    if breed is None:
+    # zone 可选——不说区域就自己探索所有猫区
+    return {"breed": breed, "zone": zone, "actions": actions}
+
+
+def parse_command(text: str) -> dict:
+    """将自然语言文字解析为 {breed, zone, actions}。
+    LLM 优先（如果已配置），关键词兜底。"""
+    # 尝试 LLM 解析
+    try:
+        from .llm_parser import parse_with_llm
+        result = parse_with_llm(text)
+        if result is not None and result.get("breed"):
+            return result
+    except Exception:
+        pass  # LLM 不可用，静默退回
+
+    # 退回关键词匹配
+    result = _parse_keyword(text)
+
+    if result["breed"] is None:
         raise ValueError(
             f"无法解析指令: \"{text}\"\n"
-            f"  已识别: zone={zone}\n"
+            f"  已识别: zone={result['zone']}\n"
             f"  缺少猫品种，请重说"
         )
 
-    # zone 可选——不说区域就自己探索所有猫区
-    return {"breed": breed, "zone": zone, "actions": actions}
+    return result

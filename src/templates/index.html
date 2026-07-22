@@ -108,7 +108,12 @@
     .btn:active { transform: scale(0.96); }
     .btn:disabled { opacity: .35; cursor: not-allowed; transform: none; }
     .btn.send { background: var(--accent); color: #fff; }
-    .btn.voice { background: var(--cat); color: #fff; font-size: 18px; padding: 10px 14px; }
+    .btn.voice { background: var(--cat); color: #fff; font-size: 18px; padding: 10px 14px; transition: all .2s; }
+    .btn.voice.recording { background: var(--danger); animation: pulse-btn .6s infinite; }
+    @keyframes pulse-btn {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(248,81,73,.5); }
+      50% { box-shadow: 0 0 0 10px rgba(248,81,73,0); }
+    }
     .btn.reset { background: #21262d; color: var(--muted); border: 1px solid var(--border); }
 
     /* 信息网格 */
@@ -378,7 +383,21 @@ async function refresh() {
   // 按钮
   const busy = state.mode==="running"||state.mode==="listening";
   document.getElementById("btnGo").disabled = busy;
-  document.getElementById("btnVoice").disabled = busy;
+  // 语音按钮：录音中不禁用（需要能点停止），任务运行时禁用
+  const voiceBtn = document.getElementById("btnVoice");
+  if (state.mode === "running") {
+    voiceBtn.disabled = true;
+    // 如果还在录音状态，自动重置
+    if (voiceRecording) {
+      voiceRecording = false;
+      voiceBtn.textContent = "🎤";
+      voiceBtn.classList.remove("recording");
+    }
+  } else if (state.mode === "listening") {
+    voiceBtn.disabled = false;  // 录音中允许点击停止
+  } else {
+    voiceBtn.disabled = false;
+  }
 
   draw();
 }
@@ -390,11 +409,37 @@ async function sendText() {
   inp.value = "";
 }
 
+let voiceRecording = false;
+
 async function sendVoice() {
-  const r = await fetch("/api/voice", {method:"POST"});
-  const data = await r.json();
-  if (!data.ok) {
-    alert("🎤 语音不可用\n\n" + data.error + "\n\n请使用文本输入框代替。");
+  const btn = document.getElementById("btnVoice");
+  if (!asrAvailable) {
+    alert("🎤 语音不可用\n\n请安装: sudo apt install libportaudio2\n\n当前请使用文本输入框代替。");
+    return;
+  }
+  if (!voiceRecording) {
+    // 开始录音
+    const r = await fetch("/api/voice/start", {method:"POST"});
+    const data = await r.json();
+    if (data.ok) {
+      voiceRecording = true;
+      btn.textContent = "⏹";
+      btn.classList.add("recording");
+      btn.title = "点击停止录音";
+    } else {
+      alert("录音启动失败: " + data.error);
+    }
+  } else {
+    // 停止录音
+    voiceRecording = false;
+    btn.textContent = "🎤";
+    btn.classList.remove("recording");
+    btn.title = "语音输入";
+    const r = await fetch("/api/voice/stop", {method:"POST"});
+    const data = await r.json();
+    if (!data.ok) {
+      alert("❌ " + data.error);
+    }
   }
 }
 

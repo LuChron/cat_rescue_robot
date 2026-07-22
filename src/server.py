@@ -110,9 +110,9 @@ def api_health():
     })
 
 
-@app.post("/api/voice")
-def api_voice():
-    """语音模式：录音 → 转录 → 解析 → 后台执行。"""
+@app.post("/api/voice/start")
+def api_voice_start():
+    """开始录音（非阻塞）。"""
     ctrl = _get_ctrl()
     if ctrl.is_busy():
         return jsonify({"ok": False, "error": "任务进行中，请等待完成"}), 409
@@ -124,26 +124,48 @@ def api_voice():
                      "请运行: sudo apt install libportaudio2 && pip install faster-whisper sounddevice",
         }), 503
 
-    from .asr import record_audio, speech_to_text
+    from .asr import start_recording, is_recording
 
-    # 标记录音状态
+    if is_recording():
+        return jsonify({"ok": False, "error": "已在录音中"}), 409
+
+    start_recording()
     ctrl.set_mode("listening")
-    ctrl.log("🎤 录音中（5 秒）...")
+    ctrl.log("🎤 录音中... 再次点击停止")
+
+    return jsonify({"ok": True})
+
+
+@app.post("/api/voice/stop")
+def api_voice_stop():
+    """停止录音 → 转录 → 解析 → 后台执行。"""
+    ctrl = _get_ctrl()
+
+    from .asr import stop_recording, speech_to_text, is_recording
+
+    if not is_recording():
+        # 可能已经停止了，尝试直接停止（清理残留）
+        pass
+
+    audio_path = stop_recording()
+    ctrl.set_mode("idle")
+
+    if audio_path is None:
+        ctrl.log("录音太短，请重试")
+        return jsonify({"ok": False, "error": "录音太短（<0.3 秒），请长按录音按钮说完再停"}), 400
 
     try:
-        audio_path = record_audio(duration=5)
+        ctrl.log("📝 正在转录...")
         text = speech_to_text(audio_path)
     except Exception as e:
-        ctrl.set_mode("idle")
-        ctrl.log(f"录音失败: {e}")
-        return jsonify({"ok": False, "error": f"录音失败: {e}"}), 500
+        ctrl.log(f"转录失败: {e}")
+        return jsonify({"ok": False, "error": f"转录失败: {e}"}), 500
 
     ctrl.log(f"📝 转录: {text}")
 
     try:
         cmd = parse_command(text)
     except ValueError as e:
-        ctrl.set_mode("idle")
         ctrl.log(f"解析失败: {e}")
         return jsonify({"ok": False, "error": str(e), "transcript": text}), 400
 
