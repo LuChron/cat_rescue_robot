@@ -42,33 +42,33 @@ Extract the user's intent from their spoken command and output ONLY a JSON objec
 - zoneG (G区, 盆栽区, potted plant area)
 - zoneH (H区, 茶水间, pantry, tea room, kitchenette)
 
-## Known actions (pick from this list only):
-- "rescue" — find/search/rescue the cat
-- "feed" — feed/give food
-- "photo" — take photo/picture
-- "return" — go back/return to start
+## Known actions — only include what the user wants to DO with the cat:
+- "play" — play with the cat (toys, laser pointer, feather wand)
+- "feed" — give treats / food
+- "photo" — take a picture
+- "talk" — make soothing sounds / meow
+- "return" — go back to base (only if no cat involved)
+
+Finding/searching for the cat is automatic whenever a breed is specified — do NOT list it as an action.
 
 ## Examples:
-User: "find the persian cat in zone C and give it some food"
-→ {"breed": "波斯猫", "zone": "zoneC", "actions": ["rescue", "feed"]}
+User: "find the persian cat in zone C and feed it"
+→ {"breed": "波斯猫", "zone": "zoneC", "actions": ["feed"]}
 
-User: "go to B区 and take a picture of the siamese"
-→ {"breed": "暹罗猫", "zone": "zoneB", "actions": ["rescue", "photo"]}
+User: "go to B区 play with the siamese and take a picture"
+→ {"breed": "暹罗猫", "zone": "zoneB", "actions": ["play", "photo"]}
 
-User: "I want to find a bengal cat, not sure where it is, just look everywhere and feed it when found"
-→ {"breed": "孟加拉猫", "zone": null, "actions": ["rescue", "feed"]}
+User: "找一下缅因猫，陪它玩然后喂零食"
+→ {"breed": "缅因猫", "zone": null, "actions": ["play", "feed"]}
 
-User: "help the maine coon cat"
-→ {"breed": "缅因猫", "zone": null, "actions": ["rescue"]}
+User: "去茶水间看看波斯猫，安抚一下拍个照"
+→ {"breed": "波斯猫", "zone": "zoneH", "actions": ["talk", "photo"]}
 
-User: "去茶水间找波斯猫"
-→ {"breed": "波斯猫", "zone": "zoneH", "actions": ["rescue"]}
+User: "在沙发区有只布偶猫，陪玩喂食拍照一条龙"
+→ {"breed": "布偶猫", "zone": "zoneE", "actions": ["play", "feed", "photo"]}
 
-User: "在沙发区有一只暹罗猫，帮我找一下"
-→ {"breed": "暹罗猫", "zone": "zoneE", "actions": ["rescue"]}
-
-User: "去桌底区看看有没有布偶猫，有的话喂一下"
-→ {"breed": "布偶猫", "zone": "zoneF", "actions": ["rescue", "feed"]}
+User: "help the maine coon cat" / "find siamese"
+→ {"breed": "缅因猫", "zone": null, "actions": []}
 
 User: "回去" / "go back"
 → {"breed": null, "zone": null, "actions": ["return"]}
@@ -131,7 +131,7 @@ def parse_with_llm(text: str) -> dict | None:
     # 去除非标准值
     valid_breeds = {"波斯猫", "暹罗猫", "缅因猫", "孟加拉猫", "布偶猫"}
     valid_zones = {"zoneA", "zoneB", "zoneC", "zoneD", "zoneE", "zoneF", "zoneG", "zoneH"}
-    valid_actions = {"rescue", "feed", "photo", "return"}
+    valid_actions = {"play", "feed", "photo", "talk", "return"}
 
     if breed and breed not in valid_breeds:
         breed = None  # LLM 编造了品种名，退回关键词
@@ -139,7 +139,5 @@ def parse_with_llm(text: str) -> dict | None:
         zone = None
 
     actions = [a for a in actions if a in valid_actions]
-    if not actions:
-        actions = ["rescue"]
 
     return {"breed": breed, "zone": zone, "actions": actions}

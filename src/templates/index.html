@@ -3,466 +3,1039 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Cat Rescue Robot — Dashboard</title>
+  <title>CatRescue-1</title>
   <style>
     :root {
-      --bg: #0d1117; --card: #161b22; --border: #30363d;
-      --text: #e6edf3; --muted: #8b949e; --accent: #58a6ff;
-      --success: #3fb950; --warn: #d2991d; --danger: #f85149;
-      --cat: #f778ba; --purple: #a371f7;
+      color-scheme: dark;
+      --bg: #070b10;
+      --panel: #0d141c;
+      --panel-2: #111b25;
+      --panel-3: #162331;
+      --line: #243443;
+      --line-2: #35495c;
+      --text: #eef4f0;
+      --muted: #8f9da8;
+      --soft: #c8d4cf;
+      --green: #5ee184;
+      --amber: #f2b84b;
+      --red: #ee685f;
+      --blue: #79b8ff;
+      --map: #0a1219;
+      --mono: "SF Mono", "JetBrains Mono", "Cascadia Mono", Consolas, monospace;
+      --sans: ui-sans-serif, -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
     }
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      background: var(--bg); color: var(--text);
-      font-family: -apple-system, "PingFang SC", "Segoe UI", sans-serif;
-      height: 100vh; overflow: hidden;
-    }
-    .layout { display: grid; grid-template-columns: 1fr 420px; height: 100vh; }
 
-    /* ====== 地图 ====== */
-    .map-panel {
-      position: relative; background: var(--card);
-      border-right: 1px solid var(--border);
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      overflow: hidden;
+      background:
+        radial-gradient(circle at 20% 0%, rgba(94,225,132,.08), transparent 32%),
+        linear-gradient(180deg, #081018, #05080c 70%);
+      color: var(--text);
+      font-family: var(--sans);
+      -webkit-font-smoothing: antialiased;
+    }
+    button, input { font: inherit; }
+
+    .app {
+      height: 100vh;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 480px;
+      grid-template-rows: 58px minmax(0, .85fr) 360px 70px;
+      gap: 12px;
+      padding: 12px;
+    }
+
+    .topbar,
+    .camera,
+    .side,
+    .map-panel,
+    .telemetry {
+      border: 1px solid var(--line);
+      background: rgba(13, 20, 28, .88);
+      box-shadow: 0 18px 50px rgba(0,0,0,.24);
+    }
+
+    .topbar {
+      grid-column: 1 / -1;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto auto;
+      align-items: center;
+      gap: 18px;
+      padding: 0 16px;
+    }
+    .brand {
+      min-width: 0;
+      display: flex;
+      align-items: baseline;
+      gap: 14px;
+    }
+    .brand strong {
+      font-size: 24px;
+      letter-spacing: -.03em;
+      white-space: nowrap;
+    }
+    .brand span {
+      color: var(--muted);
+      font: 12px/1 var(--mono);
+      white-space: nowrap;
+    }
+    .top-meta {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      color: var(--soft);
+      font: 12px/1 var(--mono);
+      white-space: nowrap;
+    }
+    .pill {
+      height: 34px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 0 15px;
+      border: 1px solid var(--line-2);
+      color: var(--text);
+      background: #090f15;
+      font: 12px/1 var(--mono);
+      white-space: nowrap;
+    }
+    .pill::before {
+      content: "";
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--muted);
+    }
+    .pill.online::before,
+    .pill.running::before,
+    .pill.listening::before {
+      background: var(--green);
+      box-shadow: 0 0 0 5px rgba(94,225,132,.13);
+    }
+    .pill.running::before,
+    .pill.listening::before { animation: blink 1s infinite; background: var(--amber); }
+    .pill.failed::before { background: var(--red); }
+    @keyframes blink { 50% { opacity: .35; transform: scale(.82); } }
+
+    .camera {
+      grid-column: 1;
+      grid-row: 2;
+      position: relative;
+      min-width: 0;
+      min-height: 0;
+      overflow: hidden;
+      background: #020405;
+    }
+    .camera-bg,
+    .camera-feed {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      display: block;
+      background: #020405;
+    }
+    .camera-bg {
+      object-fit: cover;
+      filter: blur(18px) saturate(.8) brightness(.46);
+      transform: scale(1.08);
+      opacity: .72;
+    }
+    .camera-feed {
+      object-fit: contain;
+      z-index: 1;
+    }
+    .camera::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background:
+        linear-gradient(180deg, rgba(0,0,0,.34), transparent 18%, transparent 76%, rgba(0,0,0,.42)),
+        repeating-linear-gradient(0deg, rgba(255,255,255,.035) 0, rgba(255,255,255,.035) 1px, transparent 1px, transparent 5px);
+      z-index: 1;
+      opacity: .28;
+    }
+    .target-card {
+      position: absolute;
+      z-index: 3;
+    }
+    .target-card {
+      right: 14px;
+      bottom: 14px;
+      min-width: 190px;
+      padding: 11px 12px;
+      background: rgba(6, 10, 14, .58);
+      border: 1px solid rgba(94,225,132,.45);
+      backdrop-filter: blur(8px);
+    }
+    .target-card span {
+      display: block;
+      margin-bottom: 6px;
+      color: var(--muted);
+      font: 9px/1 var(--mono);
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+    .target-card b {
+      display: block;
+      color: var(--green);
+      font-size: 18px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .side {
+      grid-column: 2;
+      grid-row: 2 / 4;
+      min-height: 0;
+      display: grid;
+      grid-template-rows: auto auto minmax(0, 175px) 88px 145px;
+      gap: 8px;
+      padding: 10px;
+      background: rgba(8, 14, 20, .92);
       overflow: hidden;
     }
-    .map-panel canvas { width: 100%; height: 100%; display: block; }
-    .legend {
-      position: absolute; bottom: 20px; left: 20px;
-      background: #0d1117cc; backdrop-filter: blur(8px);
-      border: 1px solid var(--border); border-radius: 12px;
-      padding: 12px 16px; display: flex; gap: 16px; font-size: 12px;
-    }
-    .legend .item { display: flex; align-items: center; gap: 6px; }
-    .legend .d { width: 10px; height: 10px; border-radius: 50%; }
-    .d.start { background: var(--accent); }
-    .d.junction { background: var(--muted); }
-    .d.cat_zone { background: var(--cat); }
-    .d.current { background: var(--warn); box-shadow: 0 0 10px var(--warn); }
-    .d.explored { background: var(--danger); }
-    .d.found { background: var(--success); box-shadow: 0 0 14px var(--success); }
-    .title-overlay {
-      position: absolute; top: 20px; left: 24px;
-      font-size: 22px; font-weight: 800; letter-spacing: -0.5px;
-    }
-    .title-overlay em { color: var(--cat); font-style: normal; }
-
-    /* ====== 右侧 ====== */
-    .side {
-      display: flex; flex-direction: column; overflow-y: auto;
-      padding: 20px; gap: 14px;
-    }
-
-    /* 状态条 */
-    .status-bar {
-      display: flex; align-items: center; gap: 12px;
-      padding: 12px 16px; border-radius: 12px;
-      background: var(--card); border: 1px solid var(--border);
-    }
-    .pulse {
-      width: 10px; height: 10px; border-radius: 50%; animation: pulse 1.5s infinite;
-    }
-    @keyframes pulse {
-      0%, 100% { opacity: 1; transform: scale(1); }
-      50% { opacity: .4; transform: scale(1.4); }
-    }
-    .pulse.idle { background: var(--muted); animation: none; }
-    .pulse.running { background: var(--accent); }
-    .pulse.success { background: var(--success); animation: none; }
-    .pulse.failed { background: var(--danger); animation: none; }
-    .pulse.listening { background: var(--purple); }
-    .status-text { font-weight: 600; font-size: 14px; flex: 1; }
-    .status-tag {
-      font-size: 11px; padding: 2px 8px; border-radius: 99px;
-      font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;
-    }
-    .status-tag.idle { background: #21262d; color: var(--muted); }
-    .status-tag.running { background: #1a2b4c; color: var(--accent); }
-    .status-tag.success { background: #0d3321; color: var(--success); }
-    .status-tag.failed { background: #3d1214; color: var(--danger); }
-    .status-tag.listening { background: #2a1744; color: var(--purple); }
-
-    /* 卡片 */
     .card {
-      background: var(--card); border: 1px solid var(--border);
-      border-radius: 12px; padding: 16px;
+      min-width: 0;
+      background: rgba(17, 27, 37, .88);
+      border: 1px solid var(--line);
     }
-    .card h3 {
-      font-size: 11px; color: var(--muted); text-transform: uppercase;
-      letter-spacing: 1.5px; margin-bottom: 12px; font-weight: 600;
+    .card h2 {
+      margin: 0;
+      padding: 10px 12px 0;
+      color: var(--text);
+      font-size: 12px;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+    .card-body { padding: 10px 12px 11px; }
+
+    .command {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 96px;
+      gap: 9px;
+    }
+    .command input {
+      min-width: 0;
+      height: 40px;
+      padding: 0 13px;
+      color: var(--text);
+      background: #0b1219;
+      border: 1px solid var(--line-2);
+      outline: none;
+    }
+    .command input:focus {
+      border-color: var(--green);
+      box-shadow: 0 0 0 3px rgba(94,225,132,.12);
+    }
+    .record {
+      height: 40px;
+      color: var(--red);
+      background: rgba(238,104,95,.09);
+      border: 1px solid rgba(238,104,95,.55);
+      cursor: pointer;
+      font-weight: 800;
+    }
+    .record.recording {
+      color: white;
+      background: var(--red);
+      animation: blink 1s infinite;
+    }
+    .run {
+      grid-column: 1 / -1;
+      height: 36px;
+      color: #07100b;
+      background: var(--amber);
+      border: 0;
+      cursor: pointer;
+      font-weight: 900;
+    }
+    button:disabled {
+      opacity: .42;
+      cursor: not-allowed;
     }
 
-    /* 输入 */
-    .input-row { display: flex; gap: 8px; }
-    .input-row input {
-      flex: 1; padding: 10px 14px; border-radius: 10px;
-      border: 1px solid var(--border); background: var(--bg);
-      color: var(--text); font-size: 14px; outline: none;
-      transition: border-color .2s;
+    .mission-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      border-top: 1px solid var(--line);
+      border-left: 1px solid var(--line);
     }
-    .input-row input:focus { border-color: var(--accent); }
-    .btn {
-      padding: 10px 18px; border-radius: 10px; border: none;
-      font-weight: 600; font-size: 14px; cursor: pointer;
-      transition: all .15s; white-space: nowrap;
+    .field {
+      min-width: 0;
+      padding: 10px 11px;
+      border-right: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+      background: rgba(13,20,28,.62);
     }
-    .btn:active { transform: scale(0.96); }
-    .btn:disabled { opacity: .35; cursor: not-allowed; transform: none; }
-    .btn.send { background: var(--accent); color: #fff; }
-    .btn.voice { background: var(--cat); color: #fff; font-size: 18px; padding: 10px 14px; transition: all .2s; }
-    .btn.voice.recording { background: var(--danger); animation: pulse-btn .6s infinite; }
-    @keyframes pulse-btn {
-      0%, 100% { box-shadow: 0 0 0 0 rgba(248,81,73,.5); }
-      50% { box-shadow: 0 0 0 10px rgba(248,81,73,0); }
+    .field span {
+      display: block;
+      margin-bottom: 7px;
+      color: var(--muted);
+      font: 10px/1 var(--mono);
+      letter-spacing: .1em;
+      text-transform: uppercase;
     }
-    .btn.reset { background: #21262d; color: var(--muted); border: 1px solid var(--border); }
+    .field b {
+      display: block;
+      min-height: 20px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      color: var(--text);
+      font-size: 14px;
+    }
+    .field b.green { color: var(--green); }
+    .field b.amber { color: var(--amber); }
 
-    /* 信息网格 */
-    .kv-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-    .kv { font-size: 13px; }
-    .kv .k { color: var(--muted); font-size: 11px; margin-bottom: 2px; }
-    .kv .v { font-weight: 600; word-break: break-all; }
-    .kv .v.highlight { color: var(--accent); }
-    .kv .v.zone { color: var(--cat); }
-
-    /* 探索进度 */
-    .progress-bar {
-      height: 6px; background: var(--bg); border-radius: 3px; margin-top: 8px;
+    .states {
+      display: grid;
+      grid-template-columns: repeat(6, 1fr);
+      align-items: start;
+      gap: 0;
+      padding-top: 2px;
     }
-    .progress-fill {
-      height: 100%; background: linear-gradient(90deg, var(--cat), var(--purple));
-      border-radius: 3px; transition: width .5s;
+    .state-step {
+      position: relative;
+      display: grid;
+      justify-items: center;
+      gap: 8px;
+      color: var(--muted);
+      font: 9px/1.15 var(--mono);
+      text-align: center;
+      text-transform: uppercase;
+    }
+    .state-step::before {
+      content: "";
+      position: absolute;
+      top: 7px;
+      left: -50%;
+      width: 100%;
+      height: 1px;
+      background: var(--line-2);
+      z-index: 0;
+    }
+    .state-step:first-child::before { display: none; }
+    .state-step i {
+      position: relative;
+      z-index: 1;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      border: 2px solid var(--muted);
+      background: var(--panel-2);
+      font-style: normal;
+    }
+    .state-step.active { color: var(--amber); }
+    .state-step.active i {
+      border-color: var(--amber);
+      box-shadow: 0 0 0 5px rgba(242,184,75,.11);
+    }
+    .state-step.done { color: var(--green); }
+    .state-step.done i {
+      border-color: var(--green);
+      background: var(--green);
     }
 
-    /* 猫找到卡片 */
-    .found-card {
-      background: linear-gradient(135deg, #1a1625, #1f1325);
-      border: 1px solid #3d1a4a; border-radius: 14px;
-      padding: 20px; text-align: center;
+    .action-grid {
+      display: flex;
+      flex-wrap: wrap;
+      align-content: flex-start;
+      gap: 7px;
+      max-height: 42px;
+      overflow: hidden;
     }
-    .found-card .icon { font-size: 56px; margin-bottom: 8px; }
-    .found-card .msg { font-size: 18px; font-weight: 700; color: var(--success); }
-    .found-card .detail { font-size: 14px; color: var(--cat); margin-top: 4px; }
-    .found-card .sub { color: var(--muted); font-size: 12px; margin-top: 2px; }
-
-    /* 动作标签 */
-    .action-tags { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; justify-content: center; }
-    .action-tag {
-      padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 600;
-      background: #0d3321; color: var(--success); border: 1px solid #1a4d34;
+    .action {
+      min-height: 0;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      padding: 7px 10px;
+      color: var(--soft);
+      background: rgba(13,20,28,.72);
+      border: 1px solid var(--line);
+      text-align: center;
+      font-size: 11px;
     }
+    .action i {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      border: 1.5px solid currentColor;
+      font-style: normal;
+      flex: 0 0 auto;
+    }
+    .action.done {
+      color: var(--green);
+      border-color: rgba(94,225,132,.45);
+      background: rgba(94,225,132,.08);
+    }
+    .action.queued { color: var(--muted); }
 
-    /* 日志 */
+    .log-card {
+      min-height: 0;
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr);
+      overflow: hidden;
+    }
     .log {
-      background: var(--bg); border-radius: 10px; padding: 12px;
-      height: 180px; overflow-y: auto;
-      font: 12px/1.7 "JetBrains Mono", "SF Mono", "Consolas", monospace;
-      white-space: pre-wrap; scroll-behavior: smooth;
+      margin: 10px 12px 12px;
+      padding: 10px 12px;
+      min-height: 0;
+      background: rgba(4, 8, 12, .72);
+      border: 1px solid var(--line);
+      color: #c7d1cc;
+      font: 12px/1.55 var(--mono);
+      display: grid;
+      grid-template-rows: repeat(3, 1fr);
+      gap: 0;
+      overflow: hidden;
     }
-    .log .ts { color: var(--muted); }
-    .log .ok { color: var(--success); }
-    .log .err { color: var(--danger); }
-    .log .info { color: var(--accent); }
+    .log:empty::before {
+      content: "No events yet.";
+      display: block;
+      padding: 8px;
+      color: var(--muted);
+    }
+    .log-line {
+      display: grid;
+      grid-template-columns: 9px minmax(0, 1fr);
+      gap: 9px;
+      align-items: center;
+      min-height: 0;
+      padding: 0 7px;
+      opacity: .7;
+    }
+    .log-line.latest {
+      opacity: 1;
+      background: rgba(94,225,132,.055);
+    }
+    .log-line::before {
+      content: "";
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--muted);
+    }
+    .log-line.ok::before { background: var(--green); }
+    .log-line.warn::before { background: var(--amber); }
+    .log-line.err::before { background: var(--red); }
+    .log-line span {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      overflow-wrap: anywhere;
+    }
 
-    /* 响应式 */
-    @media (max-width: 900px) {
-      .layout { grid-template-columns: 1fr; }
-      .map-panel { height: 45vh; }
+    .map-panel {
+      grid-column: 1;
+      grid-row: 3;
+      min-width: 0;
+      min-height: 0;
+      display: grid;
+      grid-template-rows: 38px minmax(0, 1fr);
+      background: var(--map);
+      overflow: hidden;
+    }
+    .map-head {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr);
+      align-items: center;
+      gap: 12px;
+      padding: 0 22px;
+      border-bottom: 1px solid var(--line);
+      color: var(--soft);
+      font: 11px/1 var(--mono);
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+    .map-head span:first-child {
+      white-space: nowrap;
+    }
+    .map-head span:last-child {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      text-align: right;
+    }
+    .map-wrap {
+      min-height: 0;
+      position: relative;
+      background:
+        linear-gradient(90deg, rgba(255,255,255,.045) 1px, transparent 1px),
+        linear-gradient(0deg, rgba(255,255,255,.045) 1px, transparent 1px),
+        radial-gradient(circle at 60% 50%, rgba(94,225,132,.06), transparent 34%),
+        var(--map);
+      background-size: 28px 28px, 28px 28px, auto, auto;
+    }
+    .map-wrap canvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+
+    .telemetry {
+      grid-column: 1 / -1;
+      grid-row: 4;
+      display: grid;
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+      align-items: center;
+      gap: 0;
+      background: rgba(10, 16, 22, .94);
+    }
+    .metric {
+      min-width: 0;
+      padding: 0 18px;
+      border-right: 1px solid var(--line);
+    }
+    .metric:last-child { border-right: 0; }
+    .metric span {
+      display: block;
+      margin-bottom: 8px;
+      color: var(--muted);
+      font: 10px/1 var(--mono);
+      letter-spacing: .1em;
+      text-transform: uppercase;
+    }
+    .metric b {
+      display: block;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      color: var(--text);
+      font-size: 17px;
+    }
+    .metric b.green { color: var(--green); }
+    .metric b.amber { color: var(--amber); }
+
+    .toast {
+      position: fixed;
+      left: 50%;
+      bottom: 22px;
+      z-index: 20;
+      transform: translateX(-50%) translateY(16px);
+      max-width: min(620px, calc(100vw - 28px));
+      padding: 12px 14px;
+      background: var(--text);
+      color: #07100b;
+      opacity: 0;
+      pointer-events: none;
+      transition: .18s ease;
+      font-size: 13px;
+      font-weight: 800;
+    }
+    .toast.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+
+    @media (max-width: 1180px) {
+      body { overflow: auto; }
+      .app {
+        height: auto;
+        min-height: 100vh;
+        grid-template-columns: 1fr;
+        grid-template-rows: 56px 54vh 260px auto auto;
+      }
+      .topbar, .camera, .map-panel, .side, .telemetry { grid-column: 1; }
+      .camera { grid-row: 2; }
+      .map-panel { grid-row: 3; }
+      .side { grid-row: 4; overflow: visible; }
+      .telemetry { grid-row: 5; grid-template-columns: repeat(2, 1fr); }
+      .metric { padding: 14px 16px; border-bottom: 1px solid var(--line); }
+    }
+
+    @media (max-width: 620px) {
+      .app { padding: 9px; gap: 9px; grid-template-rows: 54px 46vh 250px auto auto; }
+      .brand span, .top-meta { display: none; }
+      .brand strong { font-size: 20px; }
+      .pill { min-width: 90px; padding: 0 10px; }
+      .target-card { min-width: 150px; }
+      .mission-grid { grid-template-columns: 1fr 1fr; }
+      .states { grid-template-columns: repeat(3, 1fr); row-gap: 14px; }
+      .state-step::before { display: none; }
+      .action-grid { max-height: none; }
+      .telemetry { grid-template-columns: 1fr; }
     }
   </style>
 </head>
 <body>
-<div class="layout">
-  <!-- ====== 地图 ====== -->
-  <div class="map-panel">
-    <canvas id="mapCanvas"></canvas>
-    <div class="title-overlay">🐱 Cat <em>Rescue</em></div>
-    <div class="legend">
-      <div class="item"><span class="d start"></span>起点</div>
-      <div class="item"><span class="d junction"></span>路口</div>
-      <div class="item"><span class="d cat_zone"></span>猫区</div>
-      <div class="item"><span class="d current"></span>当前</div>
-      <div class="item"><span class="d explored"></span>已搜</div>
-      <div class="item"><span class="d found"></span>找到</div>
-    </div>
-  </div>
-
-  <!-- ====== 右侧面板 ====== -->
-  <div class="side">
-    <!-- 状态条 -->
-    <div class="status-bar">
-      <span class="pulse idle" id="pulse"></span>
-      <span class="status-text" id="statusText">等待指令</span>
-      <span class="status-tag idle" id="statusTag">IDLE</span>
-    </div>
-
-    <!-- 指令输入 -->
-    <div class="card">
-      <h3>🎤 语音 / 文本指令</h3>
-      <div class="input-row">
-        <input id="cmdInput" placeholder="find persian and feed / go to zone c rescue siamese..."
-               onkeydown="if(event.key==='Enter')sendText()" autofocus>
-        <button class="btn send" id="btnGo" onclick="sendText()">发送</button>
-        <button class="btn voice" id="btnVoice" onclick="sendVoice()" title="语音输入">🎤</button>
+  <main class="app">
+    <header class="topbar">
+      <div class="brand">
+        <strong>CatRescue-1</strong>
+        <span>Voice-Guided Cat Rescue Robot</span>
       </div>
-    </div>
-
-    <!-- 解析结果 -->
-    <div class="card" id="cmdCard" style="display:none">
-      <h3>📋 指令解析</h3>
-      <div class="kv-grid">
-        <div class="kv"><div class="k">转录文字</div><div class="v" id="cmdText" style="color:var(--muted);font-size:12px">-</div></div>
-        <div class="kv"><div class="k">目标品种</div><div class="v highlight" id="cmdBreed">-</div></div>
-        <div class="kv"><div class="k">目标区域</div><div class="v zone" id="cmdZone">自动探索</div></div>
-        <div class="kv"><div class="k">护理动作</div><div class="v" id="cmdActs">-</div></div>
+      <div class="top-meta">
+        <span>Robot ID: CR-01</span>
+        <span>Mode: Autonomous</span>
       </div>
-    </div>
+      <div class="pill idle" id="modePill">IDLE</div>
+    </header>
 
-    <!-- 导航 -->
-    <div class="card">
-      <h3>🗺️ 导航状态</h3>
-      <div class="kv-grid">
-        <div class="kv"><div class="k">状态机</div><div class="v" id="navState">IDLE</div></div>
-        <div class="kv"><div class="k">当前位置</div><div class="v zone" id="currentNode">start</div></div>
-        <div class="kv"><div class="k">路线</div><div class="v" id="routeInfo" style="font-size:11px;color:var(--muted)">-</div></div>
-        <div class="kv"><div class="k">已搜索猫区</div><div class="v" id="exploredZones">-</div></div>
+    <section class="camera">
+      <img class="camera-bg" src="/api/camera/stream" alt="" aria-hidden="true">
+      <img class="camera-feed" src="/api/camera/stream" alt="Live cat detection camera">
+      <div class="target-card">
+        <span>Target Breed</span>
+        <b id="targetBreed">Waiting</b>
       </div>
-      <div class="progress-bar"><div class="progress-fill" id="progressFill" style="width:0%"></div></div>
-    </div>
+    </section>
 
-    <!-- 找到猫！ -->
-    <div class="found-card" id="foundCard" style="display:none">
-      <div class="icon">🐱</div>
-      <div class="msg">找到目标猫！</div>
-      <div class="detail" id="foundBreed"></div>
-      <div class="sub" id="foundZone"></div>
-      <div class="action-tags" id="foundActions"></div>
-    </div>
+    <aside class="side">
+      <section class="card">
+        <h2>Command</h2>
+        <div class="card-body">
+          <div class="command">
+            <input id="cmdInput" placeholder="Speak or type command..." onkeydown="if(event.key==='Enter')sendText()" autofocus>
+            <button class="record" id="btnVoice" onclick="sendVoice()">Record</button>
+            <button class="run" id="btnGo" onclick="sendText()">Run Mission</button>
+          </div>
+        </div>
+      </section>
 
-    <!-- 日志 -->
-    <div class="card" style="flex:1;display:flex;flex-direction:column;min-height:0">
-      <h3>📜 运行日志</h3>
-      <div class="log" id="logBox"></div>
-    </div>
-  </div>
-</div>
+      <section class="card">
+        <h2>Mission</h2>
+        <div class="card-body">
+          <div class="mission-grid">
+            <div class="field"><span>Target Breed</span><b class="green" id="cmdBreed">-</b></div>
+            <div class="field"><span>Zone</span><b id="cmdZone">Auto</b></div>
+            <div class="field"><span>Mission</span><b id="missionName">Rescue</b></div>
+          </div>
+        </div>
+      </section>
 
-<script>
-// ====== 地图 ======
-let mapData = null, state = {};
-const canvas = document.getElementById("mapCanvas");
+      <section class="card">
+        <h2>State Machine</h2>
+        <div class="card-body">
+          <div class="states" id="stateSteps"></div>
+          <div class="mission-grid" style="margin-top:14px">
+            <div class="field"><span>Current State</span><b class="amber" id="navState">IDLE</b></div>
+            <div class="field"><span>Position</span><b id="currentNode">start</b></div>
+            <div class="field"><span>Searched</span><b id="searched">0/0</b></div>
+          </div>
+        </div>
+      </section>
 
-function resize() {
-  canvas.width = canvas.parentElement.clientWidth;
-  canvas.height = canvas.parentElement.clientHeight;
-}
-window.addEventListener("resize", () => { resize(); draw(); });
-resize();
+      <section class="card">
+        <h2>Care Actions</h2>
+        <div class="card-body">
+          <div class="action-grid" id="actionGrid"></div>
+        </div>
+      </section>
 
-fetch("/api/map").then(r => r.json()).then(d => { mapData = d; draw(); });
+      <section class="card log-card">
+        <h2>Run Log</h2>
+        <div class="log" id="logBox"></div>
+      </section>
+    </aside>
 
-function draw() {
-  if (!mapData) return;
-  const ctx = canvas.getContext("2d");
-  const w = canvas.width, h = canvas.height;
-  ctx.clearRect(0, 0, w, h);
+    <section class="map-panel">
+      <div class="map-head">
+        <span>Navigation Map · Indoor Graph</span>
+        <span id="routeSummary">No route assigned</span>
+      </div>
+      <div class="map-wrap">
+        <canvas id="mapCanvas"></canvas>
+      </div>
+    </section>
 
-  const nodes = mapData.nodes, ids = Object.keys(nodes);
-  const pad = 80;
-  let xm = Infinity, xM = -Infinity, ym = Infinity, yM = -Infinity;
-  ids.forEach(id => { const n = nodes[id]; xm = Math.min(xm, n.x); xM = Math.max(xM, n.x); ym = Math.min(ym, n.y); yM = Math.max(yM, n.y); });
-  const s = Math.min((w-pad*2)/Math.max(xM-xm,100), (h-pad*2)/Math.max(yM-ym,100));
-  const ox = (w - (xM-xm)*s)/2 - xm*s, oy = (h - (yM-ym)*s)/2 - ym*s;
-  const X = x => ox + x*s, Y = y => oy + y*s;
+    <section class="telemetry">
+      <div class="metric"><span>Target</span><b id="metricTarget">-</b></div>
+      <div class="metric"><span>Route Nodes</span><b id="metricRoute">0</b></div>
+      <div class="metric"><span>Distance to Target</span><b class="amber" id="metricDistance">-</b></div>
+      <div class="metric"><span>Vision</span><b class="green" id="metricVision">Stream</b></div>
+      <div class="metric"><span>Voice</span><b id="metricVoice">Checking</b></div>
+      <div class="metric"><span>Time</span><b id="metricTime">--:--:--</b></div>
+    </section>
+  </main>
 
-  // 背景网格
-  ctx.strokeStyle = "#ffffff05"; ctx.lineWidth = 1;
-  for (let x = pad; x < w-pad; x += 40) { ctx.beginPath(); ctx.moveTo(x, pad); ctx.lineTo(x, h-pad); ctx.stroke(); }
-  for (let y = pad; y < h-pad; y += 40) { ctx.beginPath(); ctx.moveTo(pad, y); ctx.lineTo(w-pad, y); ctx.stroke(); }
+  <div class="toast" id="toast"></div>
 
-  // 边
-  (mapData.edges||[]).forEach(e => {
-    const a = nodes[e.from], b = nodes[e.to];
-    if (!a || !b) return;
-    ctx.beginPath(); ctx.moveTo(X(a.x), Y(a.y)); ctx.lineTo(X(b.x), Y(b.y));
-    ctx.strokeStyle = "#30363d"; ctx.lineWidth = 2; ctx.stroke();
+  <script>
+    let mapData = null;
+    let state = {};
+    let voiceRecording = false;
+    let asrAvailable = false;
 
-    // 距离标签
-    ctx.fillStyle = "#484f58"; ctx.font = "10px 'JetBrains Mono',monospace";
-    ctx.textAlign = "center";
-    ctx.fillText(e.dist_cm + "cm", (X(a.x)+X(b.x))/2, (Y(a.y)+Y(b.y))/2 - 6);
-  });
+    const canvas = document.getElementById("mapCanvas");
+    const ctx = canvas.getContext("2d");
 
-  // 路线
-  if (state.route && state.route.length > 1) {
-    ctx.strokeStyle = "#58a6ff"; ctx.lineWidth = 3; ctx.setLineDash([10,6]);
-    ctx.beginPath();
-    state.route.forEach((nid,i) => {
-      const n = nodes[nid]; if (!n) return;
-      i === 0 ? ctx.moveTo(X(n.x), Y(n.y)) : ctx.lineTo(X(n.x), Y(n.y));
+    const actionLabels = {
+      play: "Play",
+      feed: "Feed",
+      photo: "Photo",
+      talk: "Talk",
+      return: "Return"
+    };
+    const defaultActions = ["play", "feed", "photo", "talk", "return"];
+    const stateOrder = ["IDLE", "PLANNING", "DRIVING", "SEARCHING", "SUCCESS", "FAILED"];
+    const stateLabels = {
+      IDLE: "Idle",
+      PLANNING: "Planning",
+      TURNING: "Turning",
+      DRIVING: "Driving",
+      ARRIVED: "Arrived",
+      SEARCHING: "Searching",
+      SUCCESS: "Detected",
+      FAILED: "Failed"
+    };
+
+    function toast(message) {
+      const box = document.getElementById("toast");
+      box.textContent = message;
+      box.classList.add("show");
+      clearTimeout(window.__toastTimer);
+      window.__toastTimer = setTimeout(() => box.classList.remove("show"), 2600);
+    }
+
+    function escapeHtml(value) {
+      return String(value)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+
+    function resizeCanvas() {
+      const rect = canvas.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = Math.max(1, Math.floor(rect.width * dpr));
+      canvas.height = Math.max(1, Math.floor(rect.height * dpr));
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+
+    window.addEventListener("resize", () => {
+      resizeCanvas();
+      drawMap();
     });
-    ctx.stroke(); ctx.setLineDash([]);
-  }
 
-  // 节点
-  ids.forEach(id => {
-    const n = nodes[id], t = n.type||"";
-    let color = "#8b949e", r = 12, glow = false;
-    if (t==="start") { color="#58a6ff"; r=16; }
-    else if (t==="cat_zone") { color="#f778ba"; r=16; }
-    else { color="#484f58"; r=9; }
-
-    if ((state.explored_zones||[]).includes(id)) color = "#f85149";
-    if (state.current_node===id) { color="#d2991d"; r=18; glow=true; }
-    if (state.cat_found && state.cat_zone===id) { color="#3fb950"; r=20; glow=true; }
-
-    if (glow) {
-      ctx.shadowColor = color; ctx.shadowBlur = 16;
+    function routeDistance(route) {
+      if (!mapData || !route || route.length < 2) return 0;
+      let total = 0;
+      for (let i = 1; i < route.length; i++) {
+        const a = route[i - 1], b = route[i];
+        const edge = (mapData.edges || []).find(e =>
+          (e.from === a && e.to === b) || (e.from === b && e.to === a)
+        );
+        if (edge) total += edge.dist_cm;
+      }
+      return total;
     }
 
-    // 节点圆
-    ctx.beginPath(); ctx.arc(X(n.x), Y(n.y), r, 0, Math.PI*2);
-    ctx.fillStyle = color; ctx.fill();
-    ctx.shadowColor = "transparent"; ctx.shadowBlur = 0;
+    function drawMap() {
+      if (!mapData) return;
+      const rect = canvas.getBoundingClientRect();
+      const w = rect.width;
+      const h = rect.height;
+      ctx.clearRect(0, 0, w, h);
 
-    // 标签
-    ctx.fillStyle = "#e6edf3"; ctx.font = `bold ${t==='cat_zone'?13:11}px -apple-system,'PingFang SC',sans-serif`;
-    ctx.textAlign = "center";
-    ctx.fillText(n.label||id, X(n.x), Y(n.y)-r-8);
-  });
-}
+      const nodes = mapData.nodes || {};
+      const ids = Object.keys(nodes);
+      const layout = {
+        zoneA: [0.6, 0.22], zoneE: [0.6, 0.52], zoneF: [0.6, 0.82],
+        junc1: [1.8, 0.36], junc4: [1.8, 0.68],
+        zoneB: [3.0, 0.22], junc3: [3.0, 0.52], start: [3.0, 0.72], zoneH: [3.0, 0.9],
+        junc2: [4.2, 0.36], junc5: [4.2, 0.68],
+        zoneC: [5.4, 0.22], zoneD: [5.4, 0.52], zoneG: [5.4, 0.82],
+      };
+      const padX = Math.max(56, w * .07);
+      const padY = Math.max(34, h * .13);
+      const X = id => padX + (layout[id]?.[0] ?? 0) / 6 * (w - padX * 2);
+      const Y = id => padY + (layout[id]?.[1] ?? 0) * (h - padY * 2);
 
-// ====== 轮询 ======
-async function refresh() {
-  const r = await fetch("/api/state"); state = await r.json();
+      ctx.save();
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
 
-  // 脉冲灯
-  const pulse = document.getElementById("pulse");
-  pulse.className = "pulse " + state.mode;
+      (mapData.edges || []).forEach(e => {
+        const a = nodes[e.from], b = nodes[e.to];
+        if (!a || !b) return;
+        ctx.beginPath();
+        ctx.moveTo(X(e.from), Y(e.from));
+        ctx.lineTo(X(e.to), Y(e.to));
+        ctx.strokeStyle = "rgba(210, 228, 224, .32)";
+        ctx.lineWidth = 2.2;
+        ctx.stroke();
+      });
 
-  // 状态文字
-  const msgs = { idle:"等待指令", listening:"🎤 正在录音...", running:"🤖 执行任务中...", success:"✅ 任务完成！", failed:"❌ 任务失败" };
-  document.getElementById("statusText").textContent = msgs[state.mode] || state.mode;
-  const tag = document.getElementById("statusTag");
-  tag.textContent = state.mode.toUpperCase(); tag.className = "status-tag " + state.mode;
+      const route = state.route || [];
+      if (route.length > 1) {
+        ctx.beginPath();
+        route.forEach((id, i) => {
+          const n = nodes[id];
+          if (!n) return;
+          i === 0 ? ctx.moveTo(X(id), Y(id)) : ctx.lineTo(X(id), Y(id));
+        });
+        ctx.strokeStyle = "rgba(242, 184, 75, .16)";
+        ctx.lineWidth = 3;
+        ctx.stroke();
 
-  // 导航
-  document.getElementById("navState").textContent = state.nav_state||"-";
-  document.getElementById("currentNode").textContent = state.current_node||"-";
-  document.getElementById("routeInfo").textContent = (state.route||[]).join(" → ")||"-";
-  const exp = (state.explored_zones||[]);
-  document.getElementById("exploredZones").textContent = exp.length ? exp.join(", ") : "无";
+        const currentIndex = route.indexOf(state.current_node);
+        if (currentIndex >= 0 && currentIndex < route.length - 1) {
+          const a = nodes[route[currentIndex]];
+          const b = nodes[route[currentIndex + 1]];
+          if (a && b) {
+            ctx.beginPath();
+            ctx.moveTo(X(route[currentIndex]), Y(route[currentIndex]));
+            ctx.lineTo(X(route[currentIndex + 1]), Y(route[currentIndex + 1]));
+            ctx.strokeStyle = "#f2b84b";
+            ctx.lineWidth = 4;
+            ctx.setLineDash([12, 8]);
+            ctx.stroke();
+            ctx.setLineDash([]);
+          }
+        }
+      }
 
-  // 进度条
-  const allZones = Object.values(mapData?.nodes||{}).filter(n=>n.type==="cat_zone").length||3;
-  const searched = exp.length + (state.cat_found?1:0);
-  document.getElementById("progressFill").style.width = Math.min(100, searched/allZones*100)+"%";
+      ids.forEach(id => {
+        const n = nodes[id];
+        const type = n.type || "junction";
+        const current = state.current_node === id;
+        const explored = (state.explored_zones || []).includes(id);
+        const found = state.cat_found && state.cat_zone === id;
+        const label = n.label || id;
 
-  // 指令解析
-  if (state.command) {
-    document.getElementById("cmdCard").style.display = "block";
-    document.getElementById("cmdText").textContent = state.transcript||"-";
-    document.getElementById("cmdBreed").textContent = state.command.breed||"?";
-    document.getElementById("cmdZone").textContent = state.command.zone||"🌍 自动探索";
-    document.getElementById("cmdActs").textContent = (state.command.actions||[]).join(", ");
-  }
+        let r = type === "cat_zone" ? 11 : 6;
+        let fill = type === "start" ? "#f2b84b" : type === "cat_zone" ? "#101c25" : "#9aa49b";
+        let stroke = type === "cat_zone" ? "#5ee184" : "rgba(238,244,240,.54)";
+        if (explored) { fill = "rgba(238,104,95,.85)"; stroke = "#ee685f"; }
+        if (found) { fill = "#5ee184"; stroke = "#5ee184"; r = 13; }
+        if (current) { fill = "#f2b84b"; stroke = "#f2b84b"; r = 13; }
 
-  // 找到猫
-  const fc = document.getElementById("foundCard");
-  if (state.cat_found) {
-    fc.style.display = "block";
-    document.getElementById("foundBreed").textContent = "🐱 "+state.cat_breed;
-    document.getElementById("foundZone").textContent = "在 "+state.cat_zone+" 找到";
-    document.getElementById("foundActions").innerHTML = (state.actions_done||[]).map(a=>`<span class="action-tag">✓ ${a}</span>`).join("");
-  } else { fc.style.display = "none"; }
+        ctx.beginPath();
+        ctx.arc(X(id), Y(id), r + 7, 0, Math.PI * 2);
+        ctx.fillStyle = "rgba(238,244,240,.055)";
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(X(id), Y(id), r, 0, Math.PI * 2);
+        ctx.fillStyle = fill;
+        ctx.fill();
+        ctx.strokeStyle = stroke;
+        ctx.lineWidth = 2;
+        ctx.stroke();
 
-  // 日志
-  const box = document.getElementById("logBox");
-  box.textContent = (state.log||[]).join("\n");
-  box.scrollTop = box.scrollHeight;
+        ctx.fillStyle = type === "cat_zone" ? "#eef4f0" : "#07100b";
+        ctx.font = "700 10px " + getComputedStyle(document.body).fontFamily;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        if (type === "cat_zone") ctx.fillText(id.replace("zone", ""), X(id), Y(id));
+        if (type === "start") ctx.fillText("S", X(id), Y(id));
 
-  // 按钮
-  const busy = state.mode==="running"||state.mode==="listening";
-  document.getElementById("btnGo").disabled = busy;
-  // 语音按钮：录音中不禁用（需要能点停止），任务运行时禁用
-  const voiceBtn = document.getElementById("btnVoice");
-  if (state.mode === "running") {
-    voiceBtn.disabled = true;
-    // 如果还在录音状态，自动重置
-    if (voiceRecording) {
+        ctx.font = "11px " + getComputedStyle(document.body).fontFamily;
+        ctx.textBaseline = "middle";
+        const labelText = type === "cat_zone" ? label.split("/")[1] || label : "";
+        if (!labelText) return;
+        const labelOffsets = {
+          zoneA: [0, -34],
+          zoneB: [0, -34],
+          zoneC: [0, -34],
+          zoneD: [54, 0],
+          zoneE: [-54, 0],
+          zoneF: [-54, 0],
+          zoneG: [54, 0],
+          zoneH: [0, 34],
+        };
+        const [dx, dy] = labelOffsets[id] || [0, -r - 14];
+        const metrics = ctx.measureText(labelText);
+        const bw = metrics.width + 14;
+        const bh = 20;
+        const labelMargin = 18;
+        const lx = Math.min(
+          Math.max(X(id) + dx, labelMargin + bw / 2),
+          w - labelMargin - bw / 2
+        );
+        const ly = Math.min(
+          Math.max(Y(id) + dy, labelMargin + bh / 2),
+          h - labelMargin - bh / 2
+        );
+        ctx.fillStyle = "rgba(8, 14, 20, .54)";
+        ctx.fillRect(lx - bw / 2, ly - bh / 2, bw, bh);
+        ctx.fillStyle = "rgba(238,244,240,.74)";
+        ctx.fillText(labelText, lx, ly + 1);
+      });
+
+      ctx.restore();
+    }
+
+    function renderStateSteps() {
+      const current = state.nav_state || "IDLE";
+      const normalized = current === "TURNING" || current === "ARRIVED" ? "DRIVING" : current;
+      const activeIndex = stateOrder.indexOf(normalized);
+      document.getElementById("stateSteps").innerHTML = stateOrder.map((id, index) => {
+        const cls = index < activeIndex ? "done" : index === activeIndex ? "active" : "";
+        return `<div class="state-step ${cls}"><i></i><span>${stateLabels[id]}</span></div>`;
+      }).join("");
+    }
+
+    function renderActions() {
+      const actions = state.command?.actions?.length ? state.command.actions : defaultActions;
+      const done = state.actions_done || [];
+      const visibleActions = actions.slice(0, 6);
+      const hiddenCount = Math.max(0, actions.length - visibleActions.length);
+      const rows = visibleActions.map(action => {
+        const cls = done.includes(action) ? "done" : "queued";
+        return `<div class="action ${cls}"><i></i><span>${actionLabels[action] || action}</span></div>`;
+      });
+      if (hiddenCount) {
+        rows.push(`<div class="action queued"><i></i><span>+${hiddenCount} more</span></div>`);
+      }
+      document.getElementById("actionGrid").innerHTML = rows.join("");
+    }
+
+    function render() {
+      const mode = state.mode || "idle";
+      const route = state.route || [];
+      const allZones = Object.values(mapData?.nodes || {}).filter(n => n.type === "cat_zone").length;
+      const searched = (state.explored_zones || []).length + (state.cat_found ? 1 : 0);
+      const breed = state.command?.breed || "-";
+      const distance = routeDistance(route);
+
+      const pill = document.getElementById("modePill");
+      pill.className = "pill " + mode;
+      pill.textContent = mode.toUpperCase();
+
+      document.getElementById("targetBreed").textContent = breed === "-" ? "Waiting" : breed;
+      document.getElementById("cmdBreed").textContent = breed;
+      document.getElementById("cmdZone").textContent = state.command?.zone || "Auto";
+      document.getElementById("missionName").textContent = state.command?.actions?.join(", ") || "Rescue";
+      document.getElementById("navState").textContent = state.nav_state || "IDLE";
+      document.getElementById("currentNode").textContent = state.current_node || "start";
+      document.getElementById("searched").textContent = `${searched}/${allZones || 0}`;
+      const routeSummary = document.getElementById("routeSummary");
+      if (route.length) {
+        const shortRoute = route.length > 4
+          ? `${route[0]} -> ${route[1]} -> ... -> ${route[route.length - 2]} -> ${route[route.length - 1]}`
+          : route.join(" -> ");
+        routeSummary.textContent = shortRoute;
+        routeSummary.title = route.join(" -> ");
+      } else {
+        routeSummary.textContent = "No route assigned";
+        routeSummary.title = "";
+      }
+
+      document.getElementById("metricTarget").textContent = breed;
+      document.getElementById("metricRoute").textContent = String(route.length || 0);
+      document.getElementById("metricDistance").textContent = distance ? `${distance} cm` : "-";
+      document.getElementById("metricVoice").textContent = asrAvailable ? "Ready" : "Text only";
+      document.getElementById("metricTime").textContent = new Date().toLocaleTimeString("en-GB");
+
+      const logBox = document.getElementById("logBox");
+      const recentLog = (state.log || []).slice(-3);
+      logBox.innerHTML = recentLog.map((message, index) => {
+        const text = String(message);
+        const lower = text.toLowerCase();
+        const cls = lower.includes("success") || text.includes("完成") || text.includes("已到达") ? "ok"
+          : lower.includes("failed") || text.includes("失败") ? "err"
+          : lower.includes("searching") || lower.includes("driving") || text.includes("正在") ? "warn"
+          : "";
+        const latest = index === recentLog.length - 1 ? "latest" : "";
+        return `<div class="log-line ${cls} ${latest}"><span>${escapeHtml(text)}</span></div>`;
+      }).join("");
+
+      document.getElementById("btnGo").disabled = mode === "running";
+      document.getElementById("btnVoice").disabled = mode === "running";
+      if (mode === "running" && voiceRecording) resetVoiceButton();
+
+      renderStateSteps();
+      renderActions();
+      drawMap();
+    }
+
+    async function refresh() {
+      try {
+        const response = await fetch("/api/state");
+        state = await response.json();
+        render();
+      } catch {
+        toast("Cannot reach robot server.");
+      }
+    }
+
+    async function sendText() {
+      const input = document.getElementById("cmdInput");
+      const text = input.value.trim();
+      if (!text) return;
+      try {
+        const response = await fetch("/api/command", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text })
+        });
+        const data = await response.json();
+        if (!response.ok || !data.ok) {
+          toast(data.error || "Command rejected.");
+          return;
+        }
+        input.value = "";
+      } catch {
+        toast("Command failed.");
+      }
+    }
+
+    function resetVoiceButton() {
       voiceRecording = false;
-      voiceBtn.textContent = "🎤";
-      voiceBtn.classList.remove("recording");
+      const button = document.getElementById("btnVoice");
+      button.textContent = "Record";
+      button.classList.remove("recording");
     }
-  } else if (state.mode === "listening") {
-    voiceBtn.disabled = false;  // 录音中允许点击停止
-  } else {
-    voiceBtn.disabled = false;
-  }
 
-  draw();
-}
-
-async function sendText() {
-  const inp = document.getElementById("cmdInput"), text = inp.value.trim();
-  if (!text) return;
-  await fetch("/api/command", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({text})});
-  inp.value = "";
-}
-
-let voiceRecording = false;
-
-async function sendVoice() {
-  const btn = document.getElementById("btnVoice");
-  if (!asrAvailable) {
-    alert("🎤 语音不可用\n\n请安装: sudo apt install libportaudio2\n\n当前请使用文本输入框代替。");
-    return;
-  }
-  if (!voiceRecording) {
-    // 开始录音
-    const r = await fetch("/api/voice/start", {method:"POST"});
-    const data = await r.json();
-    if (data.ok) {
-      voiceRecording = true;
-      btn.textContent = "⏹";
-      btn.classList.add("recording");
-      btn.title = "点击停止录音";
-    } else {
-      alert("录音启动失败: " + data.error);
+    async function sendVoice() {
+      const button = document.getElementById("btnVoice");
+      if (!asrAvailable) {
+        toast("Voice input unavailable. Use text command.");
+        return;
+      }
+      if (!voiceRecording) {
+        const response = await fetch("/api/voice/start", { method: "POST" });
+        const data = await response.json();
+        if (!data.ok) {
+          toast(data.error || "Recording failed.");
+          return;
+        }
+        voiceRecording = true;
+        button.textContent = "Stop";
+        button.classList.add("recording");
+      } else {
+        resetVoiceButton();
+        const response = await fetch("/api/voice/stop", { method: "POST" });
+        const data = await response.json();
+        if (!data.ok) toast(data.error || "Voice command failed.");
+      }
     }
-  } else {
-    // 停止录音
-    voiceRecording = false;
-    btn.textContent = "🎤";
-    btn.classList.remove("recording");
-    btn.title = "语音输入";
-    const r = await fetch("/api/voice/stop", {method:"POST"});
-    const data = await r.json();
-    if (!data.ok) {
-      alert("❌ " + data.error);
-    }
-  }
-}
 
-// 检测语音功能是否可用
-let asrAvailable = false;
-async function checkHealth() {
-  try {
-    const r = await fetch("/api/health");
-    const h = await r.json();
-    asrAvailable = h.asr_available;
-    const btn = document.getElementById("btnVoice");
-    if (!asrAvailable) {
-      btn.title = "语音功能不可用（缺少 PortAudio 或 faster-whisper）";
-      btn.style.opacity = "0.4";
-    } else {
-      btn.title = "语音输入";
-      btn.style.opacity = "1";
+    async function init() {
+      resizeCanvas();
+      renderStateSteps();
+      renderActions();
+      try {
+        const mapResponse = await fetch("/api/map");
+        mapData = await mapResponse.json();
+      } catch {
+        toast("Map failed to load.");
+      }
+      try {
+        const healthResponse = await fetch("/api/health");
+        const health = await healthResponse.json();
+        asrAvailable = !!health.asr_available;
+      } catch {
+        asrAvailable = false;
+      }
+      await refresh();
+      setInterval(refresh, 450);
     }
-  } catch(e) { /* 忽略 */ }
-}
-checkHealth();
 
-setInterval(refresh, 400); refresh();
-</script>
+    init();
+  </script>
 </body>
 </html>

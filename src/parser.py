@@ -74,17 +74,30 @@ ZONE_KEYWORDS: dict[str, str] = {
 }
 
 ACTION_KEYWORDS: dict[str, List[str]] = {
+    # 陪玩
+    "play":      ["play"],
+    "玩":        ["play"],
+    "逗":        ["play"],
+    # 投喂
     "feed":      ["feed"],
     "喂":        ["feed"],
     "投喂":      ["feed"],
-    "rescue":    ["rescue"],
-    "救":        ["rescue"],
-    "救助":      ["rescue"],
-    "find":      ["rescue"],
-    "找":        ["rescue"],
-    "search":    ["rescue"],
-    "take care": ["feed", "photo"],
-    "照顾":      ["feed", "photo"],
+    "零食":      ["feed"],
+    "吃":        ["feed"],
+    # 拍照
+    "photo":     ["photo"],
+    "拍照":      ["photo"],
+    "拍":        ["photo"],
+    # 安抚
+    "talk":      ["talk"],
+    "安抚":      ["talk"],
+    "声音":      ["talk"],
+    "喵":        ["talk"],
+    # 组合
+    "照顾":      ["play", "feed", "talk"],
+    "互动":      ["play", "talk", "photo"],
+    "一条龙":    ["play", "feed", "photo", "talk"],
+    # 返回
     "return":    ["return"],
     "回去":      ["return"],
     "回来":      ["return"],
@@ -117,10 +130,14 @@ def _parse_keyword(text: str) -> dict:
                 if a not in actions:
                     actions.append(a)
 
-    if not actions:
-        actions = ["rescue"]
+    # 没指定互动动作 → 只找猫，不互动（breed 非空就会自动搜索）
+
+    # return 不需要 breed
+    if "return" in actions:
+        return {"breed": None, "zone": None, "actions": ["return"]}
 
     # zone 可选——不说区域就自己探索所有猫区
+    # breed 非空 = 隐式搜索猫；actions 只放互动动作
     return {"breed": breed, "zone": zone, "actions": actions}
 
 
@@ -132,6 +149,14 @@ def parse_command(text: str) -> dict:
         from .llm_parser import parse_with_llm
         result = parse_with_llm(text)
         if result is not None and result.get("breed"):
+            # LLM 成功解析了品种，但区域/动作可能漏了 → 用关键词补充
+            kw = _parse_keyword(text)
+            if result.get("zone") is None and kw.get("zone"):
+                result["zone"] = kw["zone"]
+            # 合并动作（去重）
+            for a in kw.get("actions", []):
+                if a not in result["actions"]:
+                    result["actions"].append(a)
             return result
     except Exception:
         pass  # LLM 不可用，静默退回
@@ -139,7 +164,7 @@ def parse_command(text: str) -> dict:
     # 退回关键词匹配
     result = _parse_keyword(text)
 
-    if result["breed"] is None:
+    if result["breed"] is None and "return" not in result["actions"]:
         raise ValueError(
             f"无法解析指令: \"{text}\"\n"
             f"  已识别: zone={result['zone']}\n"

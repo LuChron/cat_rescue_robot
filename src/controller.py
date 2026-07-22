@@ -31,6 +31,7 @@ class NavigationController:
             "cat_breed": None,
             "cat_zone": None,
             "actions_done": [],
+            "current_action": "",       # 当前正在执行的护理动作
             "explored_zones": [],
             "log": [],
         }
@@ -59,6 +60,7 @@ class NavigationController:
                 "cat_breed": self._state["cat_breed"],
                 "cat_zone": self._state["cat_zone"],
                 "actions_done": list(self._state["actions_done"]),
+                "current_action": self._state["current_action"],
                 "explored_zones": list(self._state["explored_zones"]),
                 "log": list(self._state["log"]),
             }
@@ -92,6 +94,7 @@ class NavigationController:
                 cat_breed=None,
                 cat_zone=None,
                 actions_done=[],
+                current_action="",
                 explored_zones=[],
             )
             self._state["log"] = []
@@ -294,21 +297,87 @@ class NavigationController:
         )
 
         from .action import run_care_actions
-        # 把 care 动作的进度也写入状态
+        # 逐动作执行，前端可看到实时进度
+        action_labels = {
+            "play": "陪它玩耍", "feed": "投喂零食",
+            "photo": "拍照留念", "talk": "语音安抚",
+            "return": "返回起点",
+        }
         for action in actions:
-            time.sleep(0.4)  # 模拟动作耗时
+            label = action_labels.get(action, action)
+            with self._lock:
+                self._state["current_action"] = label
+            self._log(f"[CARE] 正在执行: {label}")
+            time.sleep(0.6)  # 模拟动作耗时
             with self._lock:
                 self._state["actions_done"].append(action)
-            self._log(f"[CARE] 执行: {action}")
+                self._state["current_action"] = f"✓ {label}"
 
         run_care_actions(breed, found_zone, actions)
 
-        self._log("[RETURN] 返回起点")
-        self._set(nav_state="IDLE", mode="idle", current_node="start")
+        with self._lock:
+            self._state["current_action"] = ""
+
+        # ---- 自动返回起点 ----
+        self._return_to_start()
 
     def _do_failed(self):
         self._log("[FAILED] 任务失败，返回起点")
-        self._set(nav_state="IDLE", mode="idle", current_node="start")
+        self._return_to_start()
+
+    def _return_to_start(self):
+        """规划并执行返回起点的路径。"""
+        prev_idx = self._current_wp_idx - 1
+        current_node = (
+            self._waypoints[prev_idx]["id"]
+            if 0 <= prev_idx < len(self._waypoints) and self._waypoints
+            else "start"
+        )
+
+        if current_node == "start":
+            self._log("[RETURN] 已在起点")
+            self._set(nav_state="IDLE", mode="idle", current_node="start")
+            return
+
+        waypoints = get_waypoints(self.map_data, current_node, "start")
+        if waypoints is None:
+            self._log("[RETURN] 无返回路径，直接重置")
+            self._set(nav_state="IDLE", mode="idle", current_node="start")
+            return
+
+        self._log(f"[RETURN] 返回起点: {' → '.join(w['id'] for w in waypoints)}")
+        self._waypoints = waypoints
+        self._current_wp_idx = 1  # 跳过当前节点
+        self._set(
+            route=[w["id"] for w in waypoints],
+            nav_state="TURNING",
+        )
+        # 重新进入状态机循环（TURNING → DRIVING → ... → ARRIVED → IDLE）
+        self._run_return_loop()
+
+    def _run_return_loop(self):
+        """返回起点的简版导航循环。"""
+        while True:
+            st = self._state["nav_state"]
+            if st == "TURNING":
+                self._do_turning()
+            elif st == "DRIVING":
+                self._do_driving()
+            elif st == "ARRIVED":
+                self._do_arrived_return()
+            elif st in ("IDLE", "SUCCESS", "FAILED"):
+                return
+            else:
+                self._do_turning()
+
+    def _do_arrived_return(self):
+        """返回途中到达节点——不搜索猫，继续到下一站或结束。"""
+        idx = self._current_wp_idx
+        if idx >= len(self._waypoints):
+            self._log("[RETURN] 已到达起点 ✓")
+            self._set(nav_state="IDLE", mode="idle", current_node="start")
+            return
+        self._set(nav_state="TURNING")
 
 
 # ---- 模块级单例（兼容 CLI main.py） ----

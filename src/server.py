@@ -6,11 +6,12 @@ Web 前端服务器 — 用于演示展示。
 import threading
 from pathlib import Path
 
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, Response, jsonify, request, send_from_directory
 
 from .parser import parse_command
 from .planner import DEFAULT_MAP_PATH, load_map
 from .controller import NavigationController
+from .camera import start_camera, stop_camera, mjpeg_generator
 
 TEMPLATE_DIR = Path(__file__).resolve().parent / "templates"
 app = Flask(__name__, template_folder=str(TEMPLATE_DIR))
@@ -101,6 +102,15 @@ def api_command():
     return jsonify({"ok": True, "command": cmd})
 
 
+@app.get("/api/camera/stream")
+def api_camera_stream():
+    """MJPEG 摄像头流（带猫检测标注）。"""
+    return Response(
+        mjpeg_generator(),
+        mimetype="multipart/x-mixed-replace; boundary=frame",
+    )
+
+
 @app.get("/api/health")
 def api_health():
     """报告服务能力：语音是否可用。"""
@@ -182,7 +192,11 @@ def api_voice_stop():
 def main():
     ctrl = _get_ctrl()
     ctrl.log("Web 前端已启动: http://127.0.0.1:8080")
-    app.run(host="127.0.0.1", port=8080, threaded=True, use_reloader=False)
+    start_camera(camera_id=0)
+    try:
+        app.run(host="127.0.0.1", port=8080, threaded=True, use_reloader=False)
+    finally:
+        stop_camera()
 
 
 if __name__ == "__main__":
