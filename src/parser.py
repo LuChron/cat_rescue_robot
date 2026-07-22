@@ -46,6 +46,14 @@ ZONE_KEYWORDS: dict[str, str] = {
     "zonec":      "zoneC",
     "c区":        "zoneC",
     "c zone":     "zoneC",
+    "zone d":     "zoneD",
+    "zoned":      "zoneD",
+    "d区":        "zoneD",
+    "d zone":     "zoneD",
+    "zone e":     "zoneE",
+    "zonee":      "zoneE",
+    "e区":        "zoneE",
+    "e zone":     "zoneE",
     "start":      "start",
     "起点":       "start",
     "junction 1": "junc1",
@@ -99,14 +107,12 @@ def parse_command(text: str) -> dict:
     if not actions:
         actions = ["rescue"]
 
-    if breed is None or zone is None:
-        found = []
-        if breed: found.append(f"breed={breed}")
-        if zone:  found.append(f"zone={zone}")
+    if breed is None:
         raise ValueError(
             f"无法解析指令: \"{text}\"\n"
-            f"  已识别: {', '.join(found) if found else '无'}\n"
-            f"  原始转录可能不准，请重说一遍或换种说法"
+            f"  已识别: zone={zone}\n"
+            f"  缺少猫品种，请重说"
         )
 
+    # zone 可选——不说区域就自己探索所有猫区
     return {"breed": breed, "zone": zone, "actions": actions}

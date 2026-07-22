@@ -1,0 +1,423 @@
+<!doctype html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Cat Rescue Robot — Dashboard</title>
+  <style>
+    :root {
+      --bg: #0d1117; --card: #161b22; --border: #30363d;
+      --text: #e6edf3; --muted: #8b949e; --accent: #58a6ff;
+      --success: #3fb950; --warn: #d2991d; --danger: #f85149;
+      --cat: #f778ba; --purple: #a371f7;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg); color: var(--text);
+      font-family: -apple-system, "PingFang SC", "Segoe UI", sans-serif;
+      height: 100vh; overflow: hidden;
+    }
+    .layout { display: grid; grid-template-columns: 1fr 420px; height: 100vh; }
+
+    /* ====== 地图 ====== */
+    .map-panel {
+      position: relative; background: var(--card);
+      border-right: 1px solid var(--border);
+      overflow: hidden;
+    }
+    .map-panel canvas { width: 100%; height: 100%; display: block; }
+    .legend {
+      position: absolute; bottom: 20px; left: 20px;
+      background: #0d1117cc; backdrop-filter: blur(8px);
+      border: 1px solid var(--border); border-radius: 12px;
+      padding: 12px 16px; display: flex; gap: 16px; font-size: 12px;
+    }
+    .legend .item { display: flex; align-items: center; gap: 6px; }
+    .legend .d { width: 10px; height: 10px; border-radius: 50%; }
+    .d.start { background: var(--accent); }
+    .d.junction { background: var(--muted); }
+    .d.cat_zone { background: var(--cat); }
+    .d.current { background: var(--warn); box-shadow: 0 0 10px var(--warn); }
+    .d.explored { background: var(--danger); }
+    .d.found { background: var(--success); box-shadow: 0 0 14px var(--success); }
+    .title-overlay {
+      position: absolute; top: 20px; left: 24px;
+      font-size: 22px; font-weight: 800; letter-spacing: -0.5px;
+    }
+    .title-overlay em { color: var(--cat); font-style: normal; }
+
+    /* ====== 右侧 ====== */
+    .side {
+      display: flex; flex-direction: column; overflow-y: auto;
+      padding: 20px; gap: 14px;
+    }
+
+    /* 状态条 */
+    .status-bar {
+      display: flex; align-items: center; gap: 12px;
+      padding: 12px 16px; border-radius: 12px;
+      background: var(--card); border: 1px solid var(--border);
+    }
+    .pulse {
+      width: 10px; height: 10px; border-radius: 50%; animation: pulse 1.5s infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: .4; transform: scale(1.4); }
+    }
+    .pulse.idle { background: var(--muted); animation: none; }
+    .pulse.running { background: var(--accent); }
+    .pulse.success { background: var(--success); animation: none; }
+    .pulse.failed { background: var(--danger); animation: none; }
+    .pulse.listening { background: var(--purple); }
+    .status-text { font-weight: 600; font-size: 14px; flex: 1; }
+    .status-tag {
+      font-size: 11px; padding: 2px 8px; border-radius: 99px;
+      font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;
+    }
+    .status-tag.idle { background: #21262d; color: var(--muted); }
+    .status-tag.running { background: #1a2b4c; color: var(--accent); }
+    .status-tag.success { background: #0d3321; color: var(--success); }
+    .status-tag.failed { background: #3d1214; color: var(--danger); }
+    .status-tag.listening { background: #2a1744; color: var(--purple); }
+
+    /* 卡片 */
+    .card {
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: 12px; padding: 16px;
+    }
+    .card h3 {
+      font-size: 11px; color: var(--muted); text-transform: uppercase;
+      letter-spacing: 1.5px; margin-bottom: 12px; font-weight: 600;
+    }
+
+    /* 输入 */
+    .input-row { display: flex; gap: 8px; }
+    .input-row input {
+      flex: 1; padding: 10px 14px; border-radius: 10px;
+      border: 1px solid var(--border); background: var(--bg);
+      color: var(--text); font-size: 14px; outline: none;
+      transition: border-color .2s;
+    }
+    .input-row input:focus { border-color: var(--accent); }
+    .btn {
+      padding: 10px 18px; border-radius: 10px; border: none;
+      font-weight: 600; font-size: 14px; cursor: pointer;
+      transition: all .15s; white-space: nowrap;
+    }
+    .btn:active { transform: scale(0.96); }
+    .btn:disabled { opacity: .35; cursor: not-allowed; transform: none; }
+    .btn.send { background: var(--accent); color: #fff; }
+    .btn.voice { background: var(--cat); color: #fff; font-size: 18px; padding: 10px 14px; }
+    .btn.reset { background: #21262d; color: var(--muted); border: 1px solid var(--border); }
+
+    /* 信息网格 */
+    .kv-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .kv { font-size: 13px; }
+    .kv .k { color: var(--muted); font-size: 11px; margin-bottom: 2px; }
+    .kv .v { font-weight: 600; word-break: break-all; }
+    .kv .v.highlight { color: var(--accent); }
+    .kv .v.zone { color: var(--cat); }
+
+    /* 探索进度 */
+    .progress-bar {
+      height: 6px; background: var(--bg); border-radius: 3px; margin-top: 8px;
+    }
+    .progress-fill {
+      height: 100%; background: linear-gradient(90deg, var(--cat), var(--purple));
+      border-radius: 3px; transition: width .5s;
+    }
+
+    /* 猫找到卡片 */
+    .found-card {
+      background: linear-gradient(135deg, #1a1625, #1f1325);
+      border: 1px solid #3d1a4a; border-radius: 14px;
+      padding: 20px; text-align: center;
+    }
+    .found-card .icon { font-size: 56px; margin-bottom: 8px; }
+    .found-card .msg { font-size: 18px; font-weight: 700; color: var(--success); }
+    .found-card .detail { font-size: 14px; color: var(--cat); margin-top: 4px; }
+    .found-card .sub { color: var(--muted); font-size: 12px; margin-top: 2px; }
+
+    /* 动作标签 */
+    .action-tags { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; justify-content: center; }
+    .action-tag {
+      padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 600;
+      background: #0d3321; color: var(--success); border: 1px solid #1a4d34;
+    }
+
+    /* 日志 */
+    .log {
+      background: var(--bg); border-radius: 10px; padding: 12px;
+      height: 180px; overflow-y: auto;
+      font: 12px/1.7 "JetBrains Mono", "SF Mono", "Consolas", monospace;
+      white-space: pre-wrap; scroll-behavior: smooth;
+    }
+    .log .ts { color: var(--muted); }
+    .log .ok { color: var(--success); }
+    .log .err { color: var(--danger); }
+    .log .info { color: var(--accent); }
+
+    /* 响应式 */
+    @media (max-width: 900px) {
+      .layout { grid-template-columns: 1fr; }
+      .map-panel { height: 45vh; }
+    }
+  </style>
+</head>
+<body>
+<div class="layout">
+  <!-- ====== 地图 ====== -->
+  <div class="map-panel">
+    <canvas id="mapCanvas"></canvas>
+    <div class="title-overlay">🐱 Cat <em>Rescue</em></div>
+    <div class="legend">
+      <div class="item"><span class="d start"></span>起点</div>
+      <div class="item"><span class="d junction"></span>路口</div>
+      <div class="item"><span class="d cat_zone"></span>猫区</div>
+      <div class="item"><span class="d current"></span>当前</div>
+      <div class="item"><span class="d explored"></span>已搜</div>
+      <div class="item"><span class="d found"></span>找到</div>
+    </div>
+  </div>
+
+  <!-- ====== 右侧面板 ====== -->
+  <div class="side">
+    <!-- 状态条 -->
+    <div class="status-bar">
+      <span class="pulse idle" id="pulse"></span>
+      <span class="status-text" id="statusText">等待指令</span>
+      <span class="status-tag idle" id="statusTag">IDLE</span>
+    </div>
+
+    <!-- 指令输入 -->
+    <div class="card">
+      <h3>🎤 语音 / 文本指令</h3>
+      <div class="input-row">
+        <input id="cmdInput" placeholder="find persian and feed / go to zone c rescue siamese..."
+               onkeydown="if(event.key==='Enter')sendText()" autofocus>
+        <button class="btn send" id="btnGo" onclick="sendText()">发送</button>
+        <button class="btn voice" id="btnVoice" onclick="sendVoice()" title="语音输入">🎤</button>
+      </div>
+    </div>
+
+    <!-- 解析结果 -->
+    <div class="card" id="cmdCard" style="display:none">
+      <h3>📋 指令解析</h3>
+      <div class="kv-grid">
+        <div class="kv"><div class="k">转录文字</div><div class="v" id="cmdText" style="color:var(--muted);font-size:12px">-</div></div>
+        <div class="kv"><div class="k">目标品种</div><div class="v highlight" id="cmdBreed">-</div></div>
+        <div class="kv"><div class="k">目标区域</div><div class="v zone" id="cmdZone">自动探索</div></div>
+        <div class="kv"><div class="k">护理动作</div><div class="v" id="cmdActs">-</div></div>
+      </div>
+    </div>
+
+    <!-- 导航 -->
+    <div class="card">
+      <h3>🗺️ 导航状态</h3>
+      <div class="kv-grid">
+        <div class="kv"><div class="k">状态机</div><div class="v" id="navState">IDLE</div></div>
+        <div class="kv"><div class="k">当前位置</div><div class="v zone" id="currentNode">start</div></div>
+        <div class="kv"><div class="k">路线</div><div class="v" id="routeInfo" style="font-size:11px;color:var(--muted)">-</div></div>
+        <div class="kv"><div class="k">已搜索猫区</div><div class="v" id="exploredZones">-</div></div>
+      </div>
+      <div class="progress-bar"><div class="progress-fill" id="progressFill" style="width:0%"></div></div>
+    </div>
+
+    <!-- 找到猫！ -->
+    <div class="found-card" id="foundCard" style="display:none">
+      <div class="icon">🐱</div>
+      <div class="msg">找到目标猫！</div>
+      <div class="detail" id="foundBreed"></div>
+      <div class="sub" id="foundZone"></div>
+      <div class="action-tags" id="foundActions"></div>
+    </div>
+
+    <!-- 日志 -->
+    <div class="card" style="flex:1;display:flex;flex-direction:column;min-height:0">
+      <h3>📜 运行日志</h3>
+      <div class="log" id="logBox"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ====== 地图 ======
+let mapData = null, state = {};
+const canvas = document.getElementById("mapCanvas");
+
+function resize() {
+  canvas.width = canvas.parentElement.clientWidth;
+  canvas.height = canvas.parentElement.clientHeight;
+}
+window.addEventListener("resize", () => { resize(); draw(); });
+resize();
+
+fetch("/api/map").then(r => r.json()).then(d => { mapData = d; draw(); });
+
+function draw() {
+  if (!mapData) return;
+  const ctx = canvas.getContext("2d");
+  const w = canvas.width, h = canvas.height;
+  ctx.clearRect(0, 0, w, h);
+
+  const nodes = mapData.nodes, ids = Object.keys(nodes);
+  const pad = 80;
+  let xm = Infinity, xM = -Infinity, ym = Infinity, yM = -Infinity;
+  ids.forEach(id => { const n = nodes[id]; xm = Math.min(xm, n.x); xM = Math.max(xM, n.x); ym = Math.min(ym, n.y); yM = Math.max(yM, n.y); });
+  const s = Math.min((w-pad*2)/Math.max(xM-xm,100), (h-pad*2)/Math.max(yM-ym,100));
+  const ox = (w - (xM-xm)*s)/2 - xm*s, oy = (h - (yM-ym)*s)/2 - ym*s;
+  const X = x => ox + x*s, Y = y => oy + y*s;
+
+  // 背景网格
+  ctx.strokeStyle = "#ffffff05"; ctx.lineWidth = 1;
+  for (let x = pad; x < w-pad; x += 40) { ctx.beginPath(); ctx.moveTo(x, pad); ctx.lineTo(x, h-pad); ctx.stroke(); }
+  for (let y = pad; y < h-pad; y += 40) { ctx.beginPath(); ctx.moveTo(pad, y); ctx.lineTo(w-pad, y); ctx.stroke(); }
+
+  // 边
+  (mapData.edges||[]).forEach(e => {
+    const a = nodes[e.from], b = nodes[e.to];
+    if (!a || !b) return;
+    ctx.beginPath(); ctx.moveTo(X(a.x), Y(a.y)); ctx.lineTo(X(b.x), Y(b.y));
+    ctx.strokeStyle = "#30363d"; ctx.lineWidth = 2; ctx.stroke();
+
+    // 距离标签
+    ctx.fillStyle = "#484f58"; ctx.font = "10px 'JetBrains Mono',monospace";
+    ctx.textAlign = "center";
+    ctx.fillText(e.dist_cm + "cm", (X(a.x)+X(b.x))/2, (Y(a.y)+Y(b.y))/2 - 6);
+  });
+
+  // 路线
+  if (state.route && state.route.length > 1) {
+    ctx.strokeStyle = "#58a6ff"; ctx.lineWidth = 3; ctx.setLineDash([10,6]);
+    ctx.beginPath();
+    state.route.forEach((nid,i) => {
+      const n = nodes[nid]; if (!n) return;
+      i === 0 ? ctx.moveTo(X(n.x), Y(n.y)) : ctx.lineTo(X(n.x), Y(n.y));
+    });
+    ctx.stroke(); ctx.setLineDash([]);
+  }
+
+  // 节点
+  ids.forEach(id => {
+    const n = nodes[id], t = n.type||"";
+    let color = "#8b949e", r = 12, glow = false;
+    if (t==="start") { color="#58a6ff"; r=16; }
+    else if (t==="cat_zone") { color="#f778ba"; r=16; }
+    else { color="#484f58"; r=9; }
+
+    if ((state.explored_zones||[]).includes(id)) color = "#f85149";
+    if (state.current_node===id) { color="#d2991d"; r=18; glow=true; }
+    if (state.cat_found && state.cat_zone===id) { color="#3fb950"; r=20; glow=true; }
+
+    if (glow) {
+      ctx.shadowColor = color; ctx.shadowBlur = 16;
+    }
+
+    // 节点圆
+    ctx.beginPath(); ctx.arc(X(n.x), Y(n.y), r, 0, Math.PI*2);
+    ctx.fillStyle = color; ctx.fill();
+    ctx.shadowColor = "transparent"; ctx.shadowBlur = 0;
+
+    // 标签
+    ctx.fillStyle = "#e6edf3"; ctx.font = `bold ${t==='cat_zone'?13:11}px -apple-system,'PingFang SC',sans-serif`;
+    ctx.textAlign = "center";
+    ctx.fillText(n.label||id, X(n.x), Y(n.y)-r-8);
+  });
+}
+
+// ====== 轮询 ======
+async function refresh() {
+  const r = await fetch("/api/state"); state = await r.json();
+
+  // 脉冲灯
+  const pulse = document.getElementById("pulse");
+  pulse.className = "pulse " + state.mode;
+
+  // 状态文字
+  const msgs = { idle:"等待指令", listening:"🎤 正在录音...", running:"🤖 执行任务中...", success:"✅ 任务完成！", failed:"❌ 任务失败" };
+  document.getElementById("statusText").textContent = msgs[state.mode] || state.mode;
+  const tag = document.getElementById("statusTag");
+  tag.textContent = state.mode.toUpperCase(); tag.className = "status-tag " + state.mode;
+
+  // 导航
+  document.getElementById("navState").textContent = state.nav_state||"-";
+  document.getElementById("currentNode").textContent = state.current_node||"-";
+  document.getElementById("routeInfo").textContent = (state.route||[]).join(" → ")||"-";
+  const exp = (state.explored_zones||[]);
+  document.getElementById("exploredZones").textContent = exp.length ? exp.join(", ") : "无";
+
+  // 进度条
+  const allZones = Object.values(mapData?.nodes||{}).filter(n=>n.type==="cat_zone").length||3;
+  const searched = exp.length + (state.cat_found?1:0);
+  document.getElementById("progressFill").style.width = Math.min(100, searched/allZones*100)+"%";
+
+  // 指令解析
+  if (state.command) {
+    document.getElementById("cmdCard").style.display = "block";
+    document.getElementById("cmdText").textContent = state.transcript||"-";
+    document.getElementById("cmdBreed").textContent = state.command.breed||"?";
+    document.getElementById("cmdZone").textContent = state.command.zone||"🌍 自动探索";
+    document.getElementById("cmdActs").textContent = (state.command.actions||[]).join(", ");
+  }
+
+  // 找到猫
+  const fc = document.getElementById("foundCard");
+  if (state.cat_found) {
+    fc.style.display = "block";
+    document.getElementById("foundBreed").textContent = "🐱 "+state.cat_breed;
+    document.getElementById("foundZone").textContent = "在 "+state.cat_zone+" 找到";
+    document.getElementById("foundActions").innerHTML = (state.actions_done||[]).map(a=>`<span class="action-tag">✓ ${a}</span>`).join("");
+  } else { fc.style.display = "none"; }
+
+  // 日志
+  const box = document.getElementById("logBox");
+  box.textContent = (state.log||[]).join("\n");
+  box.scrollTop = box.scrollHeight;
+
+  // 按钮
+  const busy = state.mode==="running"||state.mode==="listening";
+  document.getElementById("btnGo").disabled = busy;
+  document.getElementById("btnVoice").disabled = busy;
+
+  draw();
+}
+
+async function sendText() {
+  const inp = document.getElementById("cmdInput"), text = inp.value.trim();
+  if (!text) return;
+  await fetch("/api/command", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({text})});
+  inp.value = "";
+}
+
+async function sendVoice() {
+  const r = await fetch("/api/voice", {method:"POST"});
+  const data = await r.json();
+  if (!data.ok) {
+    alert("🎤 语音不可用\n\n" + data.error + "\n\n请使用文本输入框代替。");
+  }
+}
+
+// 检测语音功能是否可用
+let asrAvailable = false;
+async function checkHealth() {
+  try {
+    const r = await fetch("/api/health");
+    const h = await r.json();
+    asrAvailable = h.asr_available;
+    const btn = document.getElementById("btnVoice");
+    if (!asrAvailable) {
+      btn.title = "语音功能不可用（缺少 PortAudio 或 faster-whisper）";
+      btn.style.opacity = "0.4";
+    } else {
+      btn.title = "语音输入";
+      btn.style.opacity = "1";
+    }
+  } catch(e) { /* 忽略 */ }
+}
+checkHealth();
+
+setInterval(refresh, 400); refresh();
+</script>
+</body>
+</html>
