@@ -36,6 +36,8 @@ def astar(
     goal: str,
 ) -> Optional[list[str]]:
     """A* 搜索，返回节点 ID 序列，若无路径返回 None。"""
+    if start not in nodes or goal not in nodes:
+        return None
 
     def _heuristic(a: str, b: str) -> float:
         ax, ay = nodes[a]["x"], nodes[a]["y"]

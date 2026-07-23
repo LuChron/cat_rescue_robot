@@ -11,7 +11,8 @@ from flask import Flask, Response, jsonify, request, send_from_directory
 from .parser import parse_command
 from .planner import DEFAULT_MAP_PATH, load_map
 from .controller import NavigationController
-from .camera import start_camera, stop_camera, mjpeg_generator
+from .camera import start_camera, stop_camera, mjpeg_generator, get_cat_status
+from .motor import get_motor
 
 TEMPLATE_DIR = Path(__file__).resolve().parent / "templates"
 app = Flask(__name__, template_folder=str(TEMPLATE_DIR))
@@ -66,9 +67,10 @@ def index():
 
 @app.get("/api/state")
 def api_state():
-    """返回导航控制器的实时状态。"""
+    """返回导航控制器 + 猫检测的实时状态。"""
     ctrl = _get_ctrl()
     state = ctrl.get_state()
+    state["cat"] = get_cat_status()
     return jsonify(state)
 
 
@@ -187,15 +189,43 @@ def api_voice_stop():
     return jsonify({"ok": True, "transcript": text, "command": cmd})
 
 
+@app.post("/api/manual")
+def api_manual():
+    """WASD 手动驾驶。"""
+    payload = request.get_json(force=True)
+    action = str(payload.get("action", "")).lower()
+    key = str(payload.get("key", "")).lower()
+
+    if action not in ("down", "up") or key not in (
+        "w", "a", "s", "d", "x", "space",  # 移动
+        "m", "1", "2", "3", "[", "]",       # 模式/速度/步长
+        "c",                                  # 拍照
+    ):
+        return jsonify({"ok": False, "error": "invalid"}), 400
+
+    motor = get_motor()
+    motor.send_key_event(action, key)
+    return jsonify({"ok": True})
+
+
 # ---- 启动 ----
 
 def main():
     ctrl = _get_ctrl()
-    ctrl.log("Web 前端已启动: http://127.0.0.1:8080")
-    start_camera(camera_id=0)
+    ctrl.log("Web 前端已启动: http://127.0.0.1:8090")
+
+    # 连接小车
+    motor = get_motor()
+    if motor.connect():
+        ctrl.log("✅ 小车已连接")
+    else:
+        ctrl.log("⚠️ 小车未连接，使用模拟模式")
+
+    start_camera()  # 自动：优先 PiCamera 流，失败回退本地摄像头
     try:
-        app.run(host="127.0.0.1", port=8080, threaded=True, use_reloader=False)
+        app.run(host="0.0.0.0", port=8090, threaded=True, use_reloader=False)
     finally:
+        motor.disconnect()
         stop_camera()
 
 

@@ -21,6 +21,7 @@ _device = None
 def _init_detector():
     """尝试加载 cat_vision_pipeline 的 YOLO + EfficientNet。"""
     global _detector_available, _detectors, _classifier, _classes, _transform, _device
+    global _cat_status, _cat_status_msg
     if _detector_available:
         return
     try:
@@ -35,6 +36,7 @@ def _init_detector():
         from torchvision.models import EfficientNet_B2_Weights
 
         _device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        _cat_status_msg = str(_device)
         _detectors = load_detectors()
         model_path = Path(
             "/media/zhao/Data1/task/NUS/cat_vision_pipeline/models/classifier/"
@@ -46,27 +48,58 @@ def _init_detector():
         _classifier, _classes = load_classifier(model_path, class_map, _device)
         _transform = EfficientNet_B2_Weights.DEFAULT.transforms()
         _detector_available = True
-        print("[CAMERA] 猫检测模型已加载")
+        _cat_status = "ready"
+        print(f"[CAMERA] 猫检测模型已加载 (device={_device})")
     except Exception as e:
+        _cat_status = "error"
+        _cat_status_msg = str(e)
         print(f"[CAMERA] 猫检测不可用 ({e})，仅显示原始画面")
         _detector_available = False
 
 
-# ---- 帧缓冲 ----
+# ---- 帧缓冲 & 检测结果 ----
 
 _frame = None
 _frame_lock = threading.Lock()
+_latest_detection: dict | None = None  # {breed, classification_confidence, detection_confidence, detector, box}
+_detection_lock = threading.Lock()
+_cat_status: str = "loading"  # loading | ready | detected | no_cat | error | stream_error
+_cat_status_msg: str = ""
 _cap: cv2.VideoCapture | None = None
 _running = False
+_source_url: str | None = None
 
 
-def _capture_loop(camera_id: int):
-    global _frame, _running
-    cap = cv2.VideoCapture(camera_id)
+def _open_capture(source) -> cv2.VideoCapture | None:
+    """打开视频源：URL 优先（树莓派 PiCamera），失败回退本地摄像头。"""
+    cap = cv2.VideoCapture(source)
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-    if not cap.isOpened():
-        print(f"[CAMERA] 无法打开摄像头 {camera_id}")
+    if cap.isOpened():
+        if isinstance(source, str) and source.startswith("http"):
+            print(f"[CAMERA] 已连接树莓派 PiCamera: {source}")
+        else:
+            print(f"[CAMERA] 已连接本地摄像头")
+        return cap
+
+    # URL 失败，回退本地摄像头
+    if isinstance(source, str) and source.startswith("http"):
+        print(f"[CAMERA] 树莓派流不可用 ({source})，回退本地摄像头...")
+        cap = cv2.VideoCapture(0)
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+        if cap.isOpened():
+            print("[CAMERA] 已连接本地摄像头（回退模式）")
+            return cap
+
+    return None
+
+
+def _capture_loop(source):
+    global _frame, _running
+    cap = _open_capture(source)
+    if cap is None:
+        print(f"[CAMERA] 无可用摄像头")
         _running = False
         return
 
@@ -85,12 +118,23 @@ def _capture_loop(camera_id: int):
         if _detector_available:
             from catvision.runtime import predict_frame
             try:
-                frame, _ = predict_frame(
+                frame, pred = predict_frame(
                     frame, _detectors, _classifier, _classes,
                     _transform, _device, 0.25, smoother=smoother,
                 )
-            except Exception:
-                pass  # 检测失败不阻塞流
+                with _detection_lock:
+                    global _latest_detection, _cat_status, _cat_status_msg
+                    _latest_detection = pred
+                    if pred:
+                        _cat_status = "detected"
+                        _cat_status_msg = f"{pred['breed']} cls={pred['classification_confidence']:.2f}"
+                    else:
+                        _cat_status = "no_cat"
+                        _cat_status_msg = "No cat detected"
+            except Exception as e:
+                with _detection_lock:
+                    _cat_status = "error"
+                    _cat_status_msg = str(e)
 
         # 状态条
         h, w = frame.shape[:2]
@@ -109,14 +153,25 @@ def _capture_loop(camera_id: int):
     cap.release()
 
 
-def start_camera(camera_id: int = 0):
-    """启动后台摄像头采集。"""
-    global _running
+def start_camera(source=None):
+    """启动后台摄像头采集。
+
+    source 可以是：
+    - None：自动模式（先试 Pi 流，失败则本地摄像头）
+    - str：URL（如 "http://100.87.177.70:5000/video_feed"）
+    - int：本地摄像头索引（如 0）
+    """
+    global _running, _source_url
     if _running:
         return
+
+    # 自动模式：优先用树莓派 PiCamera 流
+    if source is None:
+        source = "http://100.87.177.70:5000/video_feed"
+
     _init_detector()
     _running = True
-    t = threading.Thread(target=_capture_loop, args=(camera_id,), daemon=True)
+    t = threading.Thread(target=_capture_loop, args=(source,), daemon=True)
     t.start()
 
 
@@ -129,6 +184,32 @@ def get_frame() -> bytes | None:
     """返回最新 JPEG 帧，无数据返回 None。"""
     with _frame_lock:
         return _frame
+
+
+def get_latest_detection() -> dict | None:
+    """返回最新猫检测结果，供导航控制器查询。"""
+    with _detection_lock:
+        return _latest_detection.copy() if _latest_detection else None
+
+
+def get_cat_status() -> dict:
+    """返回猫检测状态，供前端展示。"""
+    with _detection_lock:
+        det = _latest_detection.copy() if _latest_detection else None
+    return {
+        "status": _cat_status,
+        "message": _cat_status_msg,
+        "detection": det,
+    }
+
+
+def reset_detection():
+    """清空检测结果（每次搜索前调用）。"""
+    global _latest_detection, _cat_status
+    with _detection_lock:
+        _latest_detection = None
+        _cat_status = "no_cat"
+        _cat_status_msg = ""
 
 
 def mjpeg_generator():
