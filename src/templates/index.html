@@ -882,17 +882,20 @@
 
       const nodes = mapData.nodes || {};
       const ids = Object.keys(nodes);
-      const layout = {
-        zoneA: [0.6, 0.22], zoneE: [0.6, 0.52], zoneF: [0.6, 0.82],
-        junc1: [1.8, 0.36], junc4: [1.8, 0.68],
-        zoneB: [3.0, 0.22], junc3: [3.0, 0.52], start: [3.0, 0.72], zoneH: [3.0, 0.9],
-        junc2: [4.2, 0.36], junc5: [4.2, 0.68],
-        zoneC: [5.4, 0.22], zoneD: [5.4, 0.52], zoneG: [5.4, 0.82],
-      };
-      const padX = Math.max(56, w * .07);
-      const padY = Math.max(34, h * .13);
-      const X = id => padX + (layout[id]?.[0] ?? 0) / 6 * (w - padX * 2);
-      const Y = id => padY + (layout[id]?.[1] ?? 0) * (h - padY * 2);
+      // 从 map.json 坐标自动算出画布位置
+      let xm = Infinity, xM = -Infinity, ym = Infinity, yM = -Infinity;
+      ids.forEach(id => {
+        const n = nodes[id]; if (!n) return;
+        xm = Math.min(xm, n.x); xM = Math.max(xM, n.x);
+        ym = Math.min(ym, n.y); yM = Math.max(yM, n.y);
+      });
+      const spanX = Math.max(xM - xm, 1), spanY = Math.max(yM - ym, 1);
+      const pad = Math.max(60, Math.min(w, h) * 0.15);
+      const scale = Math.min((w - pad * 2) / spanX, (h - pad * 2) / spanY) * 0.85;
+      const ox = (w - spanX * scale) / 2 - xm * scale;
+      const oy = (h - spanY * scale) / 2 - ym * scale;
+      const X = id => { const n = nodes[id]; return n ? ox + n.x * scale : 0; };
+      const Y = id => { const n = nodes[id]; return n ? oy + n.y * scale : 0; };
 
       ctx.save();
       ctx.lineCap = "round";
@@ -976,17 +979,7 @@
         ctx.textBaseline = "middle";
         const labelText = type === "cat_zone" ? mapLabels[id] || id : "";
         if (!labelText) return;
-        const labelOffsets = {
-          zoneA: [0, -34],
-          zoneB: [0, -34],
-          zoneC: [0, -34],
-          zoneD: [54, 0],
-          zoneE: [-54, 0],
-          zoneF: [-54, 0],
-          zoneG: [54, 0],
-          zoneH: [0, 34],
-        };
-        const [dx, dy] = labelOffsets[id] || [0, -r - 14];
+        const [dx, dy] = [0, -r - 14];
         const metrics = ctx.measureText(labelText);
         const bw = metrics.width + 14;
         const bh = 20;

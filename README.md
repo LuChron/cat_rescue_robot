@@ -51,9 +51,10 @@ if parts[0] == "step" and len(parts) > 1:
 | `找波斯猫` | 探索全部猫区搜索波斯猫 |
 | `去C区找斯芬克斯猫` | 导航到 C 区搜索斯芬克斯猫 |
 | `去B区找布偶猫喂食拍照` | 完整任务：导航→搜索→互动 |
+| `找狗` / `找鸡` / `找猫` / `找动物` | 通用搜索（不指定品种） |
 | `回去` / `回到起点` | 返回起点 |
 
-当前视觉模型可确认：波斯猫、布偶猫、斯芬克斯猫、新加坡猫、兔狲；也可搜索任意猫、狗和鸟类。COCO 的 `bird` 类不能进一步确认一定是鸡。
+视觉模型：YOLO26n 多物种检测（猫/狗/鸟） + YOLO11m 猫兜底 + EfficientNet-B2 五分类（波斯猫/布偶猫/斯芬克斯猫/新加坡猫/兔狲）。通用 "猫"/"狗"/"鸟"/"动物" 也可识别，不挑品种。不支持暹罗猫/缅因猫/孟加拉猫（模型未训练）。
 
 ### 互动动作
 
@@ -151,7 +152,9 @@ final_project/
 ├── README.md
 ├── requirements.txt
 ├── config/
-│   └── map.json              # 14 节点拓扑地图
+│   ├── map.json              # 当前使用的地图
+│   ├── map_simple.json       # 5 节点简单测试版
+│   └── map_full.json         # 14 节点完整版
 ├── src/
 │   ├── asr.py                # 语音→文字 (faster-whisper)
 │   ├── parser.py             # 指令解析 (LLM + 关键词)
@@ -180,12 +183,22 @@ final_project/
 | `ASR_DEVICE` | `auto` | 自动优先 CUDA，也可设为 `cpu` / `cuda` |
 | `ASR_COMPUTE_TYPE` | CUDA: `int8_float16`；CPU: `int8` | 推理精度 |
 | `VISION_INTERVAL` | `0.25` | 视觉推理最小间隔（秒） |
+| `VISION_RESULT_TTL` | `1.5` | 检测结果有效期（秒） |
+| `VISION_STABLE_FRAMES` | `2` | 连续稳定帧数阈值 |
+| `MAP_NAME` | `map_simple` | 地图名（config/ 下的 json 文件名） |
 | `CATVISION_ROOT` | 同级 `cat_vision_pipeline` | 已验证视觉 pipeline 路径 |
 | `CAMERA_STREAM_URL` | `http://100.87.177.70:5000/video_feed` | PiCamera MJPEG 地址 |
 | `ROBOT_HOST` | `100.87.177.70` | 树莓派控制地址 |
 | `ROBOT_CONTROL_PORT` | `8765` | 树莓派 TCP 控制端口 |
 
-地图文件 `config/map.json` 可自定义节点和边。
+地图默认使用 `config/map_simple.json`（5 节点测试版），可通过环境变量切换：
+
+```bash
+MAP_NAME=map_full python -m src.server    # 完整版 14 节点
+MAP_NAME=map_simple python -m src.server  # 简单版 5 节点（默认）
+```
+
+地图文件 `config/map.json` 可自定义节点和边，格式见 `map_simple.json`。
 
 ## 依赖
 

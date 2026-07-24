@@ -1,16 +1,18 @@
 """
 地图加载与 A* 路径规划。
-地图格式见 config/map.json。
+config/ 下有 map_full.json（14节点完整版）和 map_simple.json（5节点测试版）。
+通过环境变量 MAP_NAME 切换，默认为 map_simple。
 """
 
 import json
 import heapq
 import math
+import os
 from pathlib import Path
 from typing import Optional
 
-
-DEFAULT_MAP_PATH = Path(__file__).resolve().parents[1] / "config" / "map.json"
+_MAP_NAME = os.environ.get("MAP_NAME", "map_simple")
+DEFAULT_MAP_PATH = Path(__file__).resolve().parents[1] / "config" / f"{_MAP_NAME}.json"
 
 
 def load_map(map_path: str | Path = DEFAULT_MAP_PATH) -> dict:
