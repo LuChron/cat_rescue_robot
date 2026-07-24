@@ -6,6 +6,7 @@ LLM 指令解析 — 用大模型理解自然语言，输出结构化指令。
 
 import json
 import os
+import re
 import urllib.request
 import urllib.error
 
@@ -13,55 +14,41 @@ import urllib.error
 LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "http://localhost:11434/v1").rstrip("/")
 LLM_MODEL = os.environ.get("LLM_MODEL", "qwen2.5:1.5b")
 LLM_API_KEY = os.environ.get("OPENAI_API_KEY", "ollama")
+LLM_TIMEOUT = float(os.environ.get("LLM_TIMEOUT", "6"))
 
 SYSTEM_PROMPT = """\
-You are a command parser for a voice-controlled cat rescue robot.
-Extract the user's intent and output ONLY a JSON object.
+Extract one robot command from Chinese or English speech. Output ONLY JSON.
 
-## Output fields (set null for unused):
-{"breed":null,"zone":null,"actions":[],"distance_cm":null,"turn_deg":null,"manual_key":null,"manual_action":null}
+Fields:
+- breed: string or null
+- zone: string or null
+- actions: string array
+- distance_cm: integer or null
+- turn_deg: integer or null
+- manual_key: string or null
+- manual_action: "down" or null
 
-## Command types (pick ONE per request):
+Breeds: cat(any cat), 波斯猫(Persian), 布偶猫(Ragdoll), 斯芬克斯猫(Sphynx), 新加坡猫(Singapura), 兔狲(Pallas cat), dog, bird, animal
+Zones: zoneA(A区/猫爬架), zoneB(B区/纸箱), zoneC(C区/窗台), zoneD(D区/书架), zoneE(E区/沙发), zoneF(F区/桌底), zoneG(G区/盆栽), zoneH(H区/茶水间)
+Actions: play, feed, photo, talk, return, forward, backward, turn_left, turn_right
+Manual keys:
+w=forward, s=backward, a=left, d=right, x=stop,
+q=base left, e=base right, r=lower arm, f=raise arm,
+t=extend arm, g=retract arm, space=gripper, z=arm home, p=arm demo
 
-### MANUAL DRIVE — direct car control (set manual_key + manual_action="down"):
-w=forward, s=backward, a=turn_left, d=turn_right, x=stop, 1=slow, 2=medium, 3=fast
-"向前"→w, "后退"→s, "左转"→a, "右转"→d, "停"→x, "加速"→3, "减速"→1
+Use distance_cm with forward/backward for bounded movement.
+Use turn_deg with turn_left/turn_right for bounded rotation.
+Use manual_key only for continuous movement, stop, arm, or gripper commands.
 
-### DISTANCE MOVE (set distance_cm + actions):
-"向前200cm"→distance_cm=200,actions=["forward"]
-"后退50"→distance_cm=50,actions=["backward"]
-No number given → use manual drive instead.
-
-### TURN (set turn_deg + actions):
-"左转90度"→turn_deg=90,actions=["turn_left"]
-
-### GO TO ZONE (breed=null, zone=zoneId):
-"去A区"→breed=null,zone="zoneA",actions=[]
-"去茶水间"→breed=null,zone="zoneH",actions=[]
-
-### FIND CAT (breed set, zone optional):
-"找波斯猫"→breed="波斯猫",zone=null,actions=[]
-"去B区找暹罗猫"→breed="暹罗猫",zone="zoneB",actions=[]
-
-### FIND + INTERACT (breed + cat actions):
-"找波斯猫喂食"→breed="波斯猫",zone=null,actions=["feed"]
-"去C区找暹罗猫拍照"→breed="暹罗猫",zone="zoneC",actions=["photo"]
-
-## Known values:
-breeds: 波斯猫, 暹罗猫, 缅因猫, 孟加拉猫, 布偶猫
-zones: zoneA(猫爬架/A区), zoneB(纸箱/B区), zoneC(窗台/C区), zoneD(书架/D区), zoneE(沙发/E区), zoneF(桌底/F区), zoneG(盆栽/G区), zoneH(茶水间/H区)
-cat_actions: play, feed, photo, talk, return
-manual_keys: w, a, s, d, x, 1, 2, 3
-
-## Examples:
-"向前" → {"manual_key":"w","manual_action":"down"}
-"停" → {"manual_key":"x","manual_action":"down"}
-"向前200cm" → {"distance_cm":200,"actions":["forward"]}
-"左转90度" → {"turn_deg":90,"actions":["turn_left"]}
-"去茶水间" → {"breed":null,"zone":"zoneH","actions":[]}
-"找波斯猫" → {"breed":"波斯猫","zone":null,"actions":[]}
-"去B区找暹罗猫喂食拍照" → {"breed":"暹罗猫","zone":"zoneB","actions":["feed","photo"]}
-"回去" → {"actions":["return"]}
+Examples:
+"直行十厘米" → {"breed":null,"zone":null,"actions":["forward"],"distance_cm":10,"turn_deg":null,"manual_key":null,"manual_action":null}
+"往左转九十度" → {"breed":null,"zone":null,"actions":["turn_left"],"distance_cm":null,"turn_deg":90,"manual_key":null,"manual_action":null}
+"raise the robot arm" → {"breed":null,"zone":null,"actions":[],"distance_cm":null,"turn_deg":null,"manual_key":"f","manual_action":"down"}
+"把机器人的手臂往上抬" → {"breed":null,"zone":null,"actions":[],"distance_cm":null,"turn_deg":null,"manual_key":"f","manual_action":"down"}
+"放下机械臂" → {"breed":null,"zone":null,"actions":[],"distance_cm":null,"turn_deg":null,"manual_key":"r","manual_action":"down"}
+"停止" → {"breed":null,"zone":null,"actions":[],"distance_cm":null,"turn_deg":null,"manual_key":"x","manual_action":"down"}
+"find Persian in zone C and feed" → {"breed":"波斯猫","zone":"zoneC","actions":["feed"],"distance_cm":null,"turn_deg":null,"manual_key":null,"manual_action":null}
+"去茶水间" → {"breed":null,"zone":"zoneH","actions":[],"distance_cm":null,"turn_deg":null,"manual_key":null,"manual_action":null}
 """
 
 
@@ -87,7 +74,7 @@ def parse_with_llm(text: str) -> dict | None:
     })
 
     try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        with urllib.request.urlopen(req, timeout=LLM_TIMEOUT) as resp:
             body = json.loads(resp.read().decode("utf-8"))
     except (urllib.error.URLError, OSError, json.JSONDecodeError) as e:
         print(f"[LLM] 请求失败: {e}")
@@ -119,19 +106,60 @@ def parse_with_llm(text: str) -> dict | None:
         actions = [actions] if actions else []
 
     # 校验
-    VB = {"波斯猫", "暹罗猫", "缅因猫", "孟加拉猫", "布偶猫"}
+    VB = {
+        "cat", "波斯猫", "布偶猫", "斯芬克斯猫", "新加坡猫", "兔狲",
+        "dog", "bird", "animal",
+    }
     VZ = {"zoneA", "zoneB", "zoneC", "zoneD", "zoneE", "zoneF", "zoneG", "zoneH"}
     VA = {"play", "feed", "photo", "talk", "return"}
-    VK = {"w", "a", "s", "d", "x", "1", "2", "3", "[", "]", "c"}
+    VK = {"w", "a", "s", "d", "x", "1", "2", "3", "[", "]", "c",
+          "q", "e", "r", "f", "t", "g", "space", "z", "p"}
 
     breed = breed if breed in VB else None
     zone = zone if zone in VZ else None
     manual_key = manual_key if manual_key in VK else None
     actions = [a for a in actions if a in VA or a in ("forward", "backward", "turn_left", "turn_right")]
 
-    return {
+    # Small local models occasionally invert paired arm keys. Explicit words
+    # are authoritative because executing the opposite arm direction is unsafe.
+    normalized_text = text.casefold()
+    manual_overrides = (
+        (r"(?:抬起|升起|往上抬|向上抬|raise).*(?:机械臂|手臂|arm)|"
+         r"(?:机械臂|手臂|arm).*(?:抬起|升起|往上抬|向上抬|raise)", "f"),
+        (r"(?:放下|降低|往下放|向下放|lower).*(?:机械臂|手臂|arm)|"
+         r"(?:机械臂|手臂|arm).*(?:放下|降低|往下放|向下放|lower)", "r"),
+        (r"(?:伸出|伸展|extend).*(?:机械臂|手臂|arm)|"
+         r"(?:机械臂|手臂|arm).*(?:伸出|伸展|extend)", "t"),
+        (r"(?:收回|缩回|retract).*(?:机械臂|手臂|arm)|"
+         r"(?:机械臂|手臂|arm).*(?:收回|缩回|retract)", "g"),
+    )
+    for pattern, key in manual_overrides:
+        if re.search(pattern, normalized_text):
+            manual_key = key
+            break
+
+    def bounded_int(value, minimum, maximum):
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            return None
+        return parsed if minimum <= parsed <= maximum else None
+
+    distance_cm = bounded_int(distance_cm, 1, 1000)
+    turn_deg = bounded_int(turn_deg, 1, 360)
+    if distance_cm and not any(a in actions for a in ("forward", "backward")):
+        distance_cm = None
+    if turn_deg and not any(a in actions for a in ("turn_left", "turn_right")):
+        turn_deg = None
+    manual_action = "down" if manual_key else None
+
+    parsed = {
         "breed": breed, "zone": zone, "actions": actions,
-        "distance_cm": int(distance_cm) if distance_cm else None,
-        "turn_deg": int(turn_deg) if turn_deg else None,
-        "manual_key": manual_key, "manual_action": manual_action if manual_key else None,
+        "distance_cm": distance_cm,
+        "turn_deg": turn_deg,
+        "manual_key": manual_key,
+        "manual_action": manual_action,
     }
+    return parsed if any((
+        breed, zone, actions, distance_cm, turn_deg, manual_key,
+    )) else None

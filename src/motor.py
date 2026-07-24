@@ -17,6 +17,7 @@ Arduino 指令：
 
 import json
 import math
+import os
 import socket
 import threading
 import time
@@ -25,10 +26,10 @@ from dataclasses import dataclass, field
 
 # ---- 默认连接参数 ----
 
-PI_HOST = "100.87.177.70"
-CONTROL_PORT = 8765
-SERIAL_PORT = "/dev/ttyACM0"
-SERIAL_BAUD = 9600
+PI_HOST = os.environ.get("ROBOT_HOST", "100.87.177.70")
+CONTROL_PORT = int(os.environ.get("ROBOT_CONTROL_PORT", "8765"))
+SERIAL_PORT = os.environ.get("ROBOT_SERIAL_PORT", "/dev/ttyACM0")
+SERIAL_BAUD = int(os.environ.get("ROBOT_SERIAL_BAUD", "9600"))
 
 DEFAULT_SPEED = 2         # 1=慢 2=中 3=快
 TURN_PWM = 180             # 转弯 PWM（Arduino 中等速度）
@@ -80,6 +81,9 @@ class MotorController:
 
     def connect(self) -> bool:
         """连接小车（TCP 到树莓派）。成功返回 True。"""
+        if self._sock is not None or self._running:
+            self.disconnect()
+        self._buffer = ""
         try:
             self._sock = socket.create_connection(
                 (self._host, self._port), timeout=5
@@ -98,11 +102,18 @@ class MotorController:
         self._reader_thread.start()
 
         # 初始化：step 模式 + 速度 2
-        self._send_raw("mode step")
+        if not self._send_raw("mode step"):
+            self.disconnect()
+            return False
         time.sleep(0.3)
-        self._send_raw("v 2")
+        if not self._send_raw("v 2"):
+            self.disconnect()
+            return False
         time.sleep(0.1)
 
+        if not self._running or self._sock is None:
+            self.disconnect()
+            return False
         with self._state_lock:
             self.state.connected = True
 
@@ -112,13 +123,27 @@ class MotorController:
     def disconnect(self):
         """断开连接。"""
         self._running = False
-        if self._sock:
+        sock = self._sock
+        if sock:
             try:
                 self._send_raw("x")
-                self._sock.close()
             except OSError:
                 pass
-            self._sock = None
+            with self._lock:
+                try:
+                    sock.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
+                try:
+                    sock.close()
+                except OSError:
+                    pass
+                if self._sock is sock:
+                    self._sock = None
+        thread = self._reader_thread
+        if thread is not None and thread is not threading.current_thread():
+            thread.join(timeout=1.0)
+        self._reader_thread = None
         with self._state_lock:
             self.state.connected = False
         print("[MOTOR] 已断开")
@@ -131,7 +156,12 @@ class MotorController:
     # 运动控制
     # ------------------------------------------------------------------
 
-    def forward(self, distance_cm: float, speed: int = DEFAULT_SPEED):
+    def forward(
+        self,
+        distance_cm: float,
+        speed: int = DEFAULT_SPEED,
+        cancel_event: threading.Event | None = None,
+    ) -> bool:
         """前进指定距离（cm），阻塞直到完成。
 
         连接真车时用 step 指令（需 Pi 补丁），
@@ -141,8 +171,7 @@ class MotorController:
         distance_cm = max(1, int(distance_cm))
 
         if not self.is_connected():
-            self._simulate_drive("forward", distance_cm)
-            return
+            return self._simulate_drive("forward", distance_cm, cancel_event)
 
         self._log(f"[MOTOR] 前进 {distance_cm}cm (速度{speed})")
 
@@ -162,24 +191,36 @@ class MotorController:
             self._send_raw("mode hold")
             time.sleep(0.1)
             self._send_key("down", "w")
-            time.sleep(distance_cm / 45.0)   # ~45cm/s 估算
+            if self._wait_cancelable(distance_cm / 45.0, cancel_event):
+                self.stop()
+                self._send_raw("mode step")
+                return False
             self._send_key("down", "x")
             time.sleep(0.15)
             self._send_raw("mode step")
             time.sleep(0.1)
         else:
-            self._wait_motion_idle(timeout=distance_cm * 0.15 + 5)
+            if not self._wait_motion_idle(
+                timeout=distance_cm * 0.15 + 5,
+                cancel_event=cancel_event,
+            ):
+                return False
 
         self._request_status()
+        return True
 
-    def backward(self, distance_cm: float, speed: int = DEFAULT_SPEED):
+    def backward(
+        self,
+        distance_cm: float,
+        speed: int = DEFAULT_SPEED,
+        cancel_event: threading.Event | None = None,
+    ) -> bool:
         """后退指定距离（cm），阻塞直到完成。"""
         speed = max(1, min(3, speed))
         distance_cm = max(1, int(distance_cm))
 
         if not self.is_connected():
-            self._simulate_drive("backward", distance_cm)
-            return
+            return self._simulate_drive("backward", distance_cm, cancel_event)
 
         self._log(f"[MOTOR] 后退 {distance_cm}cm (速度{speed})")
         self._send_step(f"s {speed} {distance_cm}")
@@ -194,15 +235,23 @@ class MotorController:
             self._send_raw("mode hold")
             time.sleep(0.1)
             self._send_key("down", "s")
-            time.sleep(distance_cm / 45.0)
+            if self._wait_cancelable(distance_cm / 45.0, cancel_event):
+                self.stop()
+                self._send_raw("mode step")
+                return False
             self._send_key("down", "x")
             time.sleep(0.15)
             self._send_raw("mode step")
             time.sleep(0.1)
         else:
-            self._wait_motion_idle(timeout=distance_cm * 0.15 + 5)
+            if not self._wait_motion_idle(
+                timeout=distance_cm * 0.15 + 5,
+                cancel_event=cancel_event,
+            ):
+                return False
 
         self._request_status()
+        return True
 
     def start_turn_left(self):
         """开始左转（非阻塞）。"""
@@ -249,12 +298,17 @@ class MotorController:
             return self.state.heading_deg
 
     def send_key_event(self, action: str, key: str):
-        """手动控制：发送键盘事件到小车。action=down/up, key=w/a/s/d/x/space。"""
-        if not self.is_connected():
-            return
-        self._send_key(action, key)
-        if action == "down" and key in ("w", "a", "s", "d"):
+        """手动控制：发送键盘事件到小车。"""
+        # 会改变机器人动作的按键都触发手动介入暂停
+        if action == "down" and key in (
+            "w", "a", "s", "d", "x",
+            "q", "e", "r", "f", "t", "g",
+            "space", "z", "p", "c",
+        ):
             self._last_manual = time.time()
+        if not self.is_connected():
+            return False
+        return self._send_key(action, key)
 
     def manual_active(self, grace: float = 2.0) -> bool:
         """最近 grace 秒内有手动驾驶操作？"""
@@ -287,15 +341,19 @@ class MotorController:
     def _send_raw(self, text: str):
         """发送原始文本行。"""
         if not self._sock:
-            return
-        try:
-            self._sock.sendall(f"{text}\n".encode("utf-8"))
-        except OSError:
-            pass
+            return False
+        with self._lock:
+            try:
+                self._sock.sendall(f"{text}\n".encode("utf-8"))
+                return True
+            except OSError:
+                with self._state_lock:
+                    self.state.connected = False
+                return False
 
     def _send_key(self, action: str, key: str):
         """发送键盘事件（标准协议）。"""
-        self._send_raw(f"{action} {key}")
+        return self._send_raw(f"{action} {key}")
 
     def _send_step(self, cmd: str):
         """发送 step 指令（扩展协议：step <arduino_cmd>）。
@@ -312,9 +370,12 @@ class MotorController:
 
     def _reader_loop(self):
         """后台读取树莓派发来的 JSON 状态。"""
-        while self._running and self._sock:
+        while self._running:
+            sock = self._sock
+            if sock is None:
+                break
             try:
-                data = self._sock.recv(4096)
+                data = sock.recv(4096)
             except socket.timeout:
                 continue
             except OSError:
@@ -333,8 +394,12 @@ class MotorController:
                     payload = json.loads(line)
                 except json.JSONDecodeError:
                     continue
-                self._handle_payload(payload)
+                try:
+                    self._handle_payload(payload)
+                except (TypeError, ValueError) as e:
+                    self._log(f"[MOTOR] Ignored malformed status: {e}")
 
+        self._running = False
         with self._state_lock:
             self.state.connected = False
 
@@ -360,14 +425,24 @@ class MotorController:
         elif ptype == "log":
             self._log(f"[PI] {p.get('message', '')}")
 
-    def _wait_motion_idle(self, timeout: float = 10.0):
+    def _wait_motion_idle(
+        self,
+        timeout: float = 10.0,
+        cancel_event: threading.Event | None = None,
+    ) -> bool:
         """等待 Arduino 完成 step 运动。"""
         deadline = time.time() + timeout
         while time.time() < deadline:
+            if cancel_event is not None and cancel_event.is_set():
+                self.stop()
+                return False
             with self._state_lock:
                 if self.state.motion in ("idle", "blocked_front"):
-                    return
+                    return True
             time.sleep(0.05)
+        self.stop()
+        self._log("[MOTOR] Motion timed out")
+        return False
 
     def _log(self, msg: str):
         with self._state_lock:
@@ -380,11 +455,27 @@ class MotorController:
     # 模拟模式
     # ------------------------------------------------------------------
 
-    def _simulate_drive(self, direction: str, distance_cm: float):
+    @staticmethod
+    def _wait_cancelable(
+        seconds: float,
+        cancel_event: threading.Event | None,
+    ) -> bool:
+        """Wait and return True when cancellation was requested."""
+        if cancel_event is None:
+            time.sleep(seconds)
+            return False
+        return cancel_event.wait(seconds)
+
+    def _simulate_drive(
+        self,
+        direction: str,
+        distance_cm: float,
+        cancel_event: threading.Event | None = None,
+    ) -> bool:
         """模拟行驶。"""
         secs = distance_cm / 50.0  # 假设 50cm/s
         self._log(f"[SIM] {direction} {distance_cm:.0f}cm ({secs:.1f}s)")
-        time.sleep(max(0.1, secs))
+        return not self._wait_cancelable(max(0.1, secs), cancel_event)
 
     def _simulate_turn(self, direction: str):
         """模拟转弯——持续更新航向直到外部 stop()。"""

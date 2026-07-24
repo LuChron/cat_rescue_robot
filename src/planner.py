@@ -40,9 +40,10 @@ def astar(
         return None
 
     def _heuristic(a: str, b: str) -> float:
-        ax, ay = nodes[a]["x"], nodes[a]["y"]
-        bx, by = nodes[b]["x"], nodes[b]["y"]
-        return math.hypot(ax - bx, ay - by)
+        # Coordinates are display pixels while edge costs are centimeters.
+        # A zero heuristic avoids mixing units and guarantees the shortest path.
+        del a, b
+        return 0.0
 
     open_set = [(0.0, start)]
     came_from: dict[str, str] = {}

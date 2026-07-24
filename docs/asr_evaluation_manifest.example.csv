@@ -1,0 +1,9 @@
+audio,language,expected
+samples/zh_forward_10.wav,zh,向前走十厘米
+samples/zh_backward_20.wav,zh,后退二十厘米
+samples/zh_turn_360.wav,zh,旋转三百六十度
+samples/zh_raise_arm.wav,zh,抬起机械臂
+samples/zh_zone_a.wav,zh,去A区
+samples/en_forward_10.wav,en,move forward 10 cm
+samples/en_turn_left_90.wav,en,turn left 90 degrees
+samples/en_stop.wav,en,stop

@@ -118,6 +118,7 @@
     }
     .pill.running::before,
     .pill.listening::before { animation: blink 1s infinite; background: var(--amber); }
+    .pill.stopping::before { background: var(--red); animation: blink .7s infinite; }
     .pill.failed::before { background: var(--red); }
     @keyframes blink { 50% { opacity: .35; transform: scale(.82); } }
 
@@ -128,22 +129,19 @@
       min-width: 0;
       min-height: 0;
       overflow: hidden;
-      background: #020405;
+      background:
+        linear-gradient(90deg, rgba(255,255,255,.025) 1px, transparent 1px),
+        linear-gradient(0deg, rgba(255,255,255,.025) 1px, transparent 1px),
+        #0a1118;
+      background-size: 28px 28px;
     }
-    .camera-bg,
     .camera-feed {
       position: absolute;
       inset: 0;
       width: 100%;
       height: 100%;
       display: block;
-      background: #020405;
-    }
-    .camera-bg {
-      object-fit: cover;
-      filter: blur(18px) saturate(.8) brightness(.46);
-      transform: scale(1.08);
-      opacity: .72;
+      background: transparent;
     }
     .camera-feed {
       object-fit: contain;
@@ -192,10 +190,10 @@
 
     .side {
       grid-column: 2;
-      grid-row: 2 / 4;
+      grid-row: 2 / 5;
       min-height: 0;
       display: grid;
-      grid-template-rows: auto auto minmax(0, 175px) 88px 145px;
+      grid-template-rows: auto auto auto minmax(240px, 1fr);
       gap: 8px;
       padding: 10px;
       background: rgba(8, 14, 20, .92);
@@ -215,10 +213,14 @@
       text-transform: uppercase;
     }
     .card-body { padding: 10px 12px 11px; }
+    .state-card .card-body {
+      padding-top: 8px;
+      padding-bottom: 9px;
+    }
 
     .command {
       display: grid;
-      grid-template-columns: minmax(0, 1fr) 96px;
+      grid-template-columns: minmax(0, 1fr) 112px;
       gap: 9px;
     }
     .command input {
@@ -235,17 +237,28 @@
       box-shadow: 0 0 0 3px rgba(94,225,132,.12);
     }
     .record {
+      min-width: 0;
       height: 40px;
+      padding: 0 9px;
       color: var(--red);
       background: rgba(238,104,95,.09);
       border: 1px solid rgba(238,104,95,.55);
       cursor: pointer;
       font-weight: 800;
+      font-size: 13px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
     .record.recording {
       color: white;
       background: var(--red);
       animation: blink 1s infinite;
+    }
+    .record.transcribing {
+      color: var(--amber);
+      border-color: rgba(242,184,75,.6);
+      background: rgba(242,184,75,.08);
     }
     .run {
       grid-column: 1 / -1;
@@ -299,7 +312,7 @@
       grid-template-columns: repeat(6, 1fr);
       align-items: start;
       gap: 0;
-      padding-top: 2px;
+      padding-top: 0;
     }
     .state-step {
       position: relative;
@@ -343,60 +356,90 @@
       background: var(--green);
     }
 
-    .action-grid {
-      display: flex;
-      flex-wrap: wrap;
-      align-content: flex-start;
-      gap: 7px;
-      max-height: 42px;
-      overflow: hidden;
-    }
-    .action {
-      min-height: 0;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      gap: 7px;
-      padding: 7px 10px;
-      color: var(--soft);
-      background: rgba(13,20,28,.72);
-      border: 1px solid var(--line);
-      text-align: center;
-      font-size: 11px;
-    }
-    .action i {
-      width: 10px;
-      height: 10px;
-      border-radius: 50%;
-      border: 1.5px solid currentColor;
-      font-style: normal;
-      flex: 0 0 auto;
-    }
-    .action.done {
-      color: var(--green);
-      border-color: rgba(94,225,132,.45);
-      background: rgba(94,225,132,.08);
-    }
-    .action.queued { color: var(--muted); }
-
     .log-card {
       min-height: 0;
       display: grid;
-      grid-template-rows: auto minmax(0, 1fr);
+      grid-template-rows: auto auto minmax(0, 1fr);
       overflow: hidden;
     }
+    .voice-result {
+      margin: 9px 12px 0;
+      padding: 6px 10px;
+      height: 144px;
+      min-height: 144px;
+      max-height: 144px;
+      display: flex;
+      flex-direction: column;
+      background: rgba(4, 8, 12, .72);
+      border: 1px solid var(--line);
+      border-left: 3px solid var(--muted);
+      overflow: hidden;
+    }
+    .voice-result.ok { border-left-color: var(--green); }
+    .voice-result.error { border-left-color: var(--red); }
+    .voice-result.processing { border-left-color: var(--amber); }
+    .voice-result-head {
+      min-height: 30px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      color: var(--muted);
+      font: 9px/1 var(--mono);
+      letter-spacing: .1em;
+      text-transform: uppercase;
+    }
+    .voice-result-head b {
+      color: var(--soft);
+      font: 800 9px/1 var(--mono);
+    }
+    .voice-result.ok .voice-result-head b { color: var(--green); }
+    .voice-result.error .voice-result-head b { color: var(--red); }
+    .voice-result.processing .voice-result-head b { color: var(--amber); }
+    .voice-row {
+      flex: 0 0 34px;
+      min-width: 0;
+      display: grid;
+      grid-template-columns: 72px minmax(0, 1fr);
+      gap: 10px;
+      align-items: center;
+      padding: 0 2px;
+      border-top: 1px solid rgba(53, 73, 92, .45);
+      font: 11px/1.35 var(--mono);
+    }
+    .voice-row > span {
+      color: var(--muted);
+      text-transform: uppercase;
+    }
+    .voice-row > strong {
+      min-width: 0;
+      color: var(--text);
+      font-weight: 600;
+      overflow-wrap: anywhere;
+    }
+    .voice-row.heard > strong,
+    .voice-row.error > strong {
+      display: -webkit-box;
+      -webkit-box-orient: vertical;
+      -webkit-line-clamp: 2;
+      overflow: hidden;
+    }
+    .voice-row.error > strong { color: #ff938b; }
     .log {
-      margin: 10px 12px 12px;
-      padding: 10px 12px;
+      margin: 8px 12px 12px;
+      padding: 7px 10px;
       min-height: 0;
       background: rgba(4, 8, 12, .72);
       border: 1px solid var(--line);
       color: #c7d1cc;
-      font: 12px/1.55 var(--mono);
-      display: grid;
-      grid-template-rows: repeat(3, 1fr);
-      gap: 0;
-      overflow: hidden;
+      font: 11px/1.45 var(--mono);
+      display: flex;
+      flex-direction: column;
+      align-items: stretch;
+      gap: 3px;
+      overflow-y: auto;
+      scrollbar-width: thin;
+      scrollbar-color: var(--line-2) transparent;
     }
     .log:empty::before {
       content: "No events yet.";
@@ -405,34 +448,39 @@
       color: var(--muted);
     }
     .log-line {
+      flex: 0 0 auto;
       display: grid;
-      grid-template-columns: 9px minmax(0, 1fr);
-      gap: 9px;
+      grid-template-columns: 72px minmax(0, 1fr);
+      gap: 10px;
       align-items: center;
-      min-height: 0;
-      padding: 0 7px;
+      min-height: 36px;
+      padding: 8px 9px;
+      border-left: 2px solid transparent;
       opacity: .7;
     }
     .log-line.latest {
       opacity: 1;
       background: rgba(94,225,132,.055);
+      border-left-color: var(--green);
     }
-    .log-line::before {
-      content: "";
-      width: 7px;
-      height: 7px;
-      border-radius: 50%;
-      background: var(--muted);
-    }
-    .log-line.ok::before { background: var(--green); }
-    .log-line.warn::before { background: var(--amber); }
-    .log-line.err::before { background: var(--red); }
-    .log-line span {
-      min-width: 0;
-      overflow: hidden;
-      text-overflow: ellipsis;
+    .log-line.err.latest { border-left-color: var(--red); }
+    .log-line.warn.latest { border-left-color: var(--amber); }
+    .log-tag {
+      color: var(--muted);
+      font-size: 10px;
+      text-transform: uppercase;
       white-space: nowrap;
+    }
+    .log-line.ok .log-tag { color: var(--green); }
+    .log-line.warn .log-tag { color: var(--amber); }
+    .log-line.err .log-tag { color: var(--red); }
+    .log-message {
+      min-width: 0;
       overflow-wrap: anywhere;
+      display: -webkit-box;
+      -webkit-box-orient: vertical;
+      -webkit-line-clamp: 2;
+      overflow: hidden;
     }
 
     .map-panel {
@@ -484,7 +532,7 @@
     }
 
     .telemetry {
-      grid-column: 1 / -1;
+      grid-column: 1;
       grid-row: 4;
       display: grid;
       grid-template-columns: repeat(6, minmax(0, 1fr));
@@ -554,6 +602,15 @@
       .metric { padding: 14px 16px; border-bottom: 1px solid var(--line); }
     }
 
+    @media (min-width: 1181px) and (max-height: 850px) {
+      .side {
+        grid-template-rows: auto auto 128px minmax(190px, 1fr);
+      }
+      .card h2 { padding-top: 8px; }
+      .card-body { padding-top: 8px; padding-bottom: 9px; }
+      .log { margin-top: 8px; margin-bottom: 9px; padding-top: 7px; padding-bottom: 7px; }
+    }
+
     @media (max-width: 620px) {
       .app { padding: 9px; gap: 9px; grid-template-rows: 54px 46vh 250px auto auto; }
       .brand span, .top-meta { display: none; }
@@ -563,7 +620,6 @@
       .mission-grid { grid-template-columns: 1fr 1fr; }
       .states { grid-template-columns: repeat(3, 1fr); row-gap: 14px; }
       .state-step::before { display: none; }
-      .action-grid { max-height: none; }
       .telemetry { grid-template-columns: 1fr; }
     }
   </style>
@@ -576,14 +632,13 @@
         <span>Voice-Guided Cat Rescue Robot</span>
       </div>
       <div class="top-meta">
-        <span>Robot ID: CR-01</span>
-        <span>Mode: Autonomous</span>
+        <span id="robotConnection">Robot: checking</span>
+        <span id="controlMode">Control: standby</span>
       </div>
       <div class="pill idle" id="modePill">IDLE</div>
     </header>
 
     <section class="camera">
-      <img class="camera-bg" src="/api/camera/stream" alt="" aria-hidden="true">
       <img class="camera-feed" id="camFeed" src="/api/camera/stream" alt="Live cat detection camera">
       <canvas id="detectOverlay" style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:2"></canvas>
       <div class="target-card">
@@ -597,7 +652,7 @@
         <h2>Command</h2>
         <div class="card-body">
           <div class="command">
-            <input id="cmdInput" placeholder="Speak or type command..." onkeydown="if(event.key==='Enter')sendText()" autofocus>
+            <input id="cmdInput" placeholder="Speak or type command..." onkeydown="if(event.key==='Enter')sendText()">
             <button class="record" id="btnVoice" onclick="sendVoice()">Record</button>
             <button class="run" id="btnGo" onclick="sendText()">Run Mission</button>
           </div>
@@ -615,7 +670,7 @@
         </div>
       </section>
 
-      <section class="card">
+      <section class="card state-card">
         <h2>State Machine</h2>
         <div class="card-body">
           <div class="states" id="stateSteps"></div>
@@ -627,15 +682,14 @@
         </div>
       </section>
 
-      <section class="card">
-        <h2>Care Actions</h2>
-        <div class="card-body">
-          <div class="action-grid" id="actionGrid"></div>
-        </div>
-      </section>
-
       <section class="card log-card">
-        <h2>Run Log</h2>
+        <h2>Voice Result &amp; Run Log</h2>
+        <div class="voice-result" id="voiceResult">
+          <div class="voice-result-head"><span>Last voice command</span><b>Waiting</b></div>
+          <div class="voice-row heard"><span>Heard</span><strong>No voice command yet</strong></div>
+          <div class="voice-row"><span>Parsed</span><strong>-</strong></div>
+          <div class="voice-row"><span>Error</span><strong>-</strong></div>
+        </div>
         <div class="log" id="logBox"></div>
       </section>
     </aside>
@@ -666,7 +720,18 @@
     let mapData = null;
     let state = {};
     let voiceRecording = false;
+    let voiceTranscribing = false;
     let asrAvailable = false;
+    let refreshing = false;
+    let commandSending = false;
+    let voiceRequestInFlight = false;
+    let voiceResult = {
+      status: "waiting",
+      heard: "No voice command yet",
+      parsed: "-",
+      error: "",
+      engine: ""
+    };
 
     const canvas = document.getElementById("mapCanvas");
     const ctx = canvas.getContext("2d");
@@ -678,7 +743,27 @@
       talk: "Talk",
       return: "Return"
     };
-    const defaultActions = ["play", "feed", "photo", "talk", "return"];
+    const breedLabels = {
+      "波斯猫": "Persian",
+      "布偶猫": "Ragdoll",
+      "斯芬克斯猫": "Sphynx",
+      "新加坡猫": "Singapura",
+      "兔狲": "Pallas cat",
+      cat: "Any cat",
+      dog: "Dog",
+      bird: "Bird",
+      animal: "Any animal"
+    };
+    const mapLabels = {
+      zoneA: "Cat tree",
+      zoneB: "Box",
+      zoneC: "Window",
+      zoneD: "Bookshelf",
+      zoneE: "Sofa",
+      zoneF: "Under table",
+      zoneG: "Plant",
+      zoneH: "Tea room"
+    };
     const stateOrder = ["IDLE", "PLANNING", "DRIVING", "SEARCHING", "SUCCESS", "FAILED"];
     const stateLabels = {
       IDLE: "Idle",
@@ -706,6 +791,60 @@
         .replaceAll(">", "&gt;")
         .replaceAll('"', "&quot;")
         .replaceAll("'", "&#039;");
+    }
+
+    function describeCommand(command) {
+      if (!command) return "Not accepted";
+      const direction = command.actions?.[0];
+      if (command.distance_cm) {
+        const verb = direction === "backward" ? "Move backward" : "Move forward";
+        return `${verb} · ${command.distance_cm} cm`;
+      }
+      if (command.turn_deg) {
+        const verb = direction === "turn_left" ? "Turn left" : "Turn right";
+        return `${verb} · ${command.turn_deg}°`;
+      }
+      const manualLabels = {
+        w: "Move forward", s: "Move backward", a: "Turn left", d: "Turn right",
+        x: "Stop", q: "Base left", e: "Base right", r: "Lower arm",
+        f: "Raise arm", t: "Extend arm", g: "Retract arm", space: "Toggle gripper",
+        z: "Arm home", p: "Arm demo"
+      };
+      if (command.manual_key) return manualLabels[command.manual_key] || "Manual control";
+      const parts = [];
+      if (command.zone) parts.push(`Go to ${command.zone}`);
+      if (command.breed) parts.push(`Find ${breedLabels[command.breed] || command.breed}`);
+      if (command.actions?.length) {
+        parts.push(command.actions.map(action => actionLabels[action] || action).join(", "));
+      }
+      return parts.join(" · ") || "Command accepted";
+    }
+
+    function renderVoiceResult() {
+      const box = document.getElementById("voiceResult");
+      const statusLabels = {
+        waiting: "Waiting",
+        processing: "Processing",
+        ok: "Accepted",
+        error: "Rejected"
+      };
+      const engine = voiceResult.engine ? ` · ${voiceResult.engine.toUpperCase()}` : "";
+      box.className = `voice-result ${voiceResult.status}`;
+      box.innerHTML = `
+        <div class="voice-result-head">
+          <span>Last voice command</span>
+          <b>${statusLabels[voiceResult.status] || "Waiting"}${engine}</b>
+        </div>
+        <div class="voice-row heard">
+          <span>Heard</span><strong>${escapeHtml(voiceResult.heard || "-")}</strong>
+        </div>
+        <div class="voice-row">
+          <span>Parsed</span><strong>${escapeHtml(voiceResult.parsed || "-")}</strong>
+        </div>
+        <div class="voice-row ${voiceResult.error ? "error" : ""}">
+          <span>Error</span><strong>${escapeHtml(voiceResult.error || "-")}</strong>
+        </div>
+      `;
     }
 
     function resizeCanvas() {
@@ -835,7 +974,7 @@
 
         ctx.font = "11px " + getComputedStyle(document.body).fontFamily;
         ctx.textBaseline = "middle";
-        const labelText = type === "cat_zone" ? label.split("/")[1] || label : "";
+        const labelText = type === "cat_zone" ? mapLabels[id] || id : "";
         if (!labelText) return;
         const labelOffsets = {
           zoneA: [0, -34],
@@ -871,7 +1010,8 @@
 
     function renderStateSteps() {
       const current = state.nav_state || "IDLE";
-      const normalized = current === "TURNING" || current === "ARRIVED" ? "DRIVING" : current;
+      const normalized = ["TURNING", "ARRIVED", "OBSTACLE_WAIT", "REPLANNING", "PAUSED", "STOPPING"].includes(current)
+        ? "DRIVING" : current;
       const activeIndex = stateOrder.indexOf(normalized);
       document.getElementById("stateSteps").innerHTML = stateOrder.map((id, index) => {
         const cls = index < activeIndex ? "done" : index === activeIndex ? "active" : "";
@@ -879,37 +1019,30 @@
       }).join("");
     }
 
-    function renderActions() {
-      const actions = state.command?.actions?.length ? state.command.actions : defaultActions;
-      const done = state.actions_done || [];
-      const visibleActions = actions.slice(0, 6);
-      const hiddenCount = Math.max(0, actions.length - visibleActions.length);
-      const rows = visibleActions.map(action => {
-        const cls = done.includes(action) ? "done" : "queued";
-        return `<div class="action ${cls}"><i></i><span>${actionLabels[action] || action}</span></div>`;
-      });
-      if (hiddenCount) {
-        rows.push(`<div class="action queued"><i></i><span>+${hiddenCount} more</span></div>`);
-      }
-      document.getElementById("actionGrid").innerHTML = rows.join("");
-    }
-
     function render() {
       const mode = state.mode || "idle";
       const route = state.route || [];
       const allZones = Object.values(mapData?.nodes || {}).filter(n => n.type === "cat_zone").length;
       const searched = (state.explored_zones || []).length + (state.cat_found ? 1 : 0);
-      const breed = state.command?.breed || "-";
+      const rawBreed = state.command?.breed || "-";
+      const breed = breedLabels[rawBreed] || rawBreed;
       const distance = routeDistance(route);
 
       const pill = document.getElementById("modePill");
       pill.className = "pill " + mode;
       pill.textContent = mode.toUpperCase();
+      document.getElementById("robotConnection").textContent =
+        state.robot_connected ? "Robot: connected" : "Robot: offline";
+      document.getElementById("controlMode").textContent =
+        mode === "running" ? "Control: autonomous" :
+        mode === "listening" ? "Control: listening" :
+        mode === "stopping" ? "Control: stopping" : "Control: standby";
 
       document.getElementById("targetBreed").textContent = breed === "-" ? "Waiting" : breed;
       document.getElementById("cmdBreed").textContent = breed;
       document.getElementById("cmdZone").textContent = state.command?.zone || "Auto";
-      document.getElementById("missionName").textContent = state.command?.actions?.join(", ") || "Rescue";
+      document.getElementById("missionName").textContent =
+        state.command ? describeCommand(state.command) : "No mission";
       document.getElementById("navState").textContent = state.nav_state || "IDLE";
       document.getElementById("currentNode").textContent = state.current_node || "start";
       document.getElementById("searched").textContent = `${searched}/${allZones || 0}`;
@@ -928,60 +1061,97 @@
       document.getElementById("metricTarget").textContent = breed;
       document.getElementById("metricRoute").textContent = String(route.length || 0);
       document.getElementById("metricDistance").textContent = distance ? `${distance} cm` : "-";
+      const visionState = state.cat?.status || "loading";
+      document.getElementById("metricVision").textContent = {
+        detected: state.cat?.detection?.stable ? "Locked" : "Confirming",
+        no_cat: "Scanning",
+        ready: "Ready",
+        loading: "Loading",
+        error: "Model error",
+        stream_error: "Stream lost"
+      }[visionState] || visionState;
       document.getElementById("metricVoice").textContent = asrAvailable ? "Ready" : "Text only";
       document.getElementById("metricTime").textContent = new Date().toLocaleTimeString("en-GB");
 
       const logBox = document.getElementById("logBox");
-      const recentLog = (state.log || []).slice(-3);
+      const keepAtBottom =
+        logBox.scrollHeight - logBox.scrollTop - logBox.clientHeight < 20;
+      const recentLog = (state.log || [])
+        .filter(message => !String(message).startsWith("[VOICE]"))
+        .slice(-8);
       logBox.innerHTML = recentLog.map((message, index) => {
         const text = String(message);
+        const tagged = text.match(/^\[([^\]]+)\]\s*(.*)$/);
+        const tag = tagged ? tagged[1] : "SYSTEM";
+        const content = tagged ? tagged[2] : text;
         const lower = text.toLowerCase();
         const cls = lower.includes("success") || text.includes("完成") || text.includes("已到达") ? "ok"
           : lower.includes("failed") || text.includes("失败") ? "err"
           : lower.includes("searching") || lower.includes("driving") || text.includes("正在") ? "warn"
           : "";
         const latest = index === recentLog.length - 1 ? "latest" : "";
-        return `<div class="log-line ${cls} ${latest}"><span>${escapeHtml(text)}</span></div>`;
+        return `<div class="log-line ${cls} ${latest}">
+          <span class="log-tag">${escapeHtml(tag)}</span>
+          <span class="log-message">${escapeHtml(content)}</span>
+        </div>`;
       }).join("");
+      if (keepAtBottom) logBox.scrollTop = logBox.scrollHeight;
 
-      document.getElementById("btnGo").disabled = mode === "running";
-      document.getElementById("btnVoice").disabled = mode === "running";
-      if (mode === "running" && voiceRecording) resetVoiceButton();
+      document.getElementById("btnGo").disabled = commandSending;
+      document.getElementById("btnVoice").disabled =
+        voiceTranscribing || voiceRequestInFlight;
 
       renderStateSteps();
-      renderActions();
+      renderVoiceResult();
       drawMap();
       drawDetect();
     }
 
     function drawDetect(){
-      const d=state.cat?.detection;if(!d||!d.box)return;
       const o=document.getElementById("detectOverlay"),f=document.getElementById("camFeed");
       if(!o||!f)return;
       const r=f.getBoundingClientRect();o.width=r.width||640;o.height=r.height||480;
       const c=o.getContext("2d");c.clearRect(0,0,o.width,o.height);
-      const[x1,y1,x2,y2]=d.box,sx=o.width/(d.frame_width||640),sy=o.height/(d.frame_height||480);
-      c.strokeStyle="#5ee184";c.lineWidth=3;c.strokeRect(x1*sx,y1*sy,(x2-x1)*sx,(y2-y1)*sy);
-      const lb=d.breed+" "+(d.classification_confidence||0).toFixed(2);
+      const d=state.cat?.detection;if(!d||!d.box)return;
+      const [x1,y1,x2,y2]=d.box;
+      const fw=d.frame_width||f.naturalWidth||640,fh=d.frame_height||f.naturalHeight||480;
+      const scale=Math.min(o.width/fw,o.height/fh);
+      const ox=(o.width-fw*scale)/2,oy=(o.height-fh*scale)/2;
+      const rx=ox+x1*scale,ry=oy+y1*scale,rw=(x2-x1)*scale,rh=(y2-y1)*scale;
+      const color=d.species==="dog"?"#79b8ff":d.species==="bird"?"#f2b84b":"#5ee184";
+      c.strokeStyle=color;c.lineWidth=d.stable?3:2;c.setLineDash(d.stable?[]:[7,5]);
+      c.strokeRect(rx,ry,rw,rh);c.setLineDash([]);
+      const rawName=d.breed||d.species||"animal";
+      const name=breedLabels[rawName]||rawName;
+      const confidence=Number(d.classification_confidence??d.detection_confidence??0);
+      const lb=`${name} ${confidence.toFixed(2)}`;
       c.font="bold 14px mono";const tw=c.measureText(lb).width;
-      c.fillStyle="#5ee184";c.fillRect(x1*sx,Math.max(0,y1*sy-22),tw+12,22);
-      c.fillStyle="#07100b";c.fillText(lb,x1*sx+6,Math.max(15,y1*sy-7));
+      c.fillStyle=color;c.fillRect(rx,Math.max(0,ry-22),tw+12,22);
+      c.fillStyle="#07100b";c.fillText(lb,rx+6,Math.max(15,ry-7));
     }
 
     async function refresh() {
+      if (refreshing) return;
+      refreshing = true;
       try {
         const response = await fetch("/api/state");
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
         state = await response.json();
         render();
       } catch {
         toast("Cannot reach robot server.");
+      } finally {
+        refreshing = false;
       }
     }
 
     async function sendText() {
+      if (commandSending) return;
       const input = document.getElementById("cmdInput");
       const text = input.value.trim();
       if (!text) return;
+      commandSending = true;
+      document.getElementById("btnGo").disabled = true;
       try {
         const response = await fetch("/api/command", {
           method: "POST",
@@ -996,44 +1166,89 @@
         input.value = "";
       } catch {
         toast("Command failed.");
+      } finally {
+        commandSending = false;
+        document.getElementById("btnGo").disabled = false;
       }
     }
 
     function resetVoiceButton() {
       voiceRecording = false;
+      voiceTranscribing = false;
       const button = document.getElementById("btnVoice");
       button.textContent = "Record";
-      button.classList.remove("recording");
+      button.disabled = false;
+      button.classList.remove("recording", "transcribing");
     }
 
     async function sendVoice() {
+      if (voiceRequestInFlight) return;
       const button = document.getElementById("btnVoice");
       if (!asrAvailable) {
         toast("Voice input unavailable. Use text command.");
         return;
       }
-      if (!voiceRecording) {
-        const response = await fetch("/api/voice/start", { method: "POST" });
-        const data = await response.json();
-        if (!data.ok) {
-          toast(data.error || "Recording failed.");
-          return;
+      voiceRequestInFlight = true;
+      button.disabled = true;
+      try {
+        if (!voiceRecording) {
+          const response = await fetch("/api/voice/start", { method: "POST" });
+          const data = await response.json();
+          if (!data.ok) {
+            toast(data.error || "Recording failed.");
+            return;
+          }
+          voiceRecording = true;
+          voiceResult = {
+            status: "processing",
+            heard: "Listening...",
+            parsed: "-",
+            error: "",
+            engine: ""
+          };
+          renderVoiceResult();
+          button.textContent = "Stop";
+          button.classList.add("recording");
+        } else {
+          voiceRecording = false;
+          voiceTranscribing = true;
+          button.textContent = "Processing";
+          button.disabled = true;
+          button.classList.remove("recording");
+          button.classList.add("transcribing");
+          const response = await fetch("/api/voice/stop", { method: "POST" });
+          const data = await response.json();
+          voiceResult = {
+            status: data.ok ? "ok" : "error",
+            heard: data.transcript || "No speech detected",
+            parsed: data.command ? describeCommand(data.command) : "Not accepted",
+            error: data.ok ? "" : (data.error || "Voice command failed."),
+            engine: data.command?.parser_source || ""
+          };
+          renderVoiceResult();
+          if (!data.ok) toast("Voice command rejected. See Voice Result.");
+          resetVoiceButton();
         }
-        voiceRecording = true;
-        button.textContent = "Stop";
-        button.classList.add("recording");
-      } else {
+      } catch (error) {
+        voiceResult = {
+          status: "error",
+          heard: "-",
+          parsed: "Not accepted",
+          error: "The voice request could not reach the robot server.",
+          engine: ""
+        };
+        renderVoiceResult();
         resetVoiceButton();
-        const response = await fetch("/api/voice/stop", { method: "POST" });
-        const data = await response.json();
-        if (!data.ok) toast(data.error || "Voice command failed.");
+        toast("Voice request failed. See Voice Result.");
+      } finally {
+        voiceRequestInFlight = false;
+        button.disabled = voiceTranscribing;
       }
     }
 
     async function init() {
       resizeCanvas();
       renderStateSteps();
-      renderActions();
       try {
         const mapResponse = await fetch("/api/map");
         mapData = await mapResponse.json();
@@ -1048,15 +1263,50 @@
         asrAvailable = false;
       }
       await refresh();
-      setInterval(refresh, 450);
+      setInterval(refresh, 750);
     }
 
-    // WASD — manual drive override
-    const DK=new Set(["w","a","s","d","x","space","m","1","2","3","[","]","c"]),PD=new Set();
+    // Manual drive and arm override
+    // === Keyboard: arm repeat-hold (key_sender-compatible) ===
+    const DK=new Set(["w","a","s","d","x","m","1","2","3","[","]","c","q","e","r","f","t","g","space","z","p"]);
+    const RK=new Set(["q","e","r","f","t","g"]),OK=new Set(["space","z","p","c"]);
+    const PD=new Set(),timers=new Map(),IF=new Set();
+    let lastManualError=0;
     function dk(k){return k===" "?"space":k.toLowerCase()}
-    function sendManual(a,k){fetch("/api/manual",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:a,key:k})}).catch(()=>{})}
-    document.addEventListener("keydown",e=>{if(document.activeElement?.tagName==="INPUT")return;const k=dk(e.key);if(!DK.has(k)||PD.has(k))return;e.preventDefault();PD.add(k);sendManual("down",k)});
-    document.addEventListener("keyup",e=>{if(document.activeElement?.tagName==="INPUT")return;const k=dk(e.key);if(!DK.has(k))return;e.preventDefault();PD.delete(k);sendManual("up",k)});
+    function sm(a,k){
+      const id=a+":"+k;if(IF.has(id))return;IF.add(id);
+      fetch("/api/manual",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:a,key:k})})
+        .then(async r=>{if(!r.ok&&Date.now()-lastManualError>2200){lastManualError=Date.now();const d=await r.json().catch(()=>({}));toast(d.error||"Manual control failed.")}})
+        .catch(()=>{if(Date.now()-lastManualError>2200){lastManualError=Date.now();toast("Robot server unavailable.")}})
+        .finally(()=>IF.delete(id))
+    }
+    function sh(k){if(timers.has(k))return;sm("down",k);timers.set(k,setInterval(()=>sm("down",k),150))}
+    function eh(k){const t=timers.get(k);if(t){clearInterval(t);timers.delete(k)}}
+
+    document.addEventListener("keydown",e=>{
+      if(document.activeElement?.tagName==="INPUT")return;
+      const k=dk(e.key);if(!DK.has(k))return;e.preventDefault();
+      if(RK.has(k)){sh(k);return}
+      if(OK.has(k)){if(e.repeat)return;sm("down",k);return}
+      if(PD.has(k))return;PD.add(k);sm("down",k);
+    });
+    document.addEventListener("keyup",e=>{
+      if(document.activeElement?.tagName==="INPUT")return;
+      const k=dk(e.key);if(!DK.has(k))return;e.preventDefault();
+      if(RK.has(k)){eh(k);return}
+      if(OK.has(k))return;
+      PD.delete(k);sm("up",k);
+    });
+    function releaseAllKeys(){
+      const wasDriving=["w","a","s","d"].some(k=>PD.has(k));
+      for(const k of [...timers.keys()])eh(k);
+      for(const k of [...PD])sm("up",k);
+      PD.clear();
+      if(wasDriving)sm("down","x");
+    }
+    window.addEventListener("blur",releaseAllKeys);
+    document.addEventListener("visibilitychange",()=>{if(document.hidden)releaseAllKeys()});
+    document.getElementById("cmdInput").addEventListener("focus",releaseAllKeys);
 
     init();
   </script>

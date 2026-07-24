@@ -3,22 +3,40 @@
 只管文本解析，不关心文字是语音来的还是键盘输入来的。
 """
 
+import re
 from typing import List
 
 # ---- 三个维度的关键词库 ----
 
 BREED_KEYWORDS: dict[str, str] = {
-    # 正确拼写
+    # 与当前 EfficientNet 五分类模型保持一致
     "persian":    "波斯猫",
     "波斯猫":      "波斯猫",
-    "siamese":    "暹罗猫",
-    "暹罗猫":      "暹罗猫",
-    "maine coon": "缅因猫",
-    "缅因猫":      "缅因猫",
-    "bengal":     "孟加拉猫",
-    "孟加拉猫":    "孟加拉猫",
     "ragdoll":    "布偶猫",
     "布偶猫":      "布偶猫",
+    "sphynx":     "斯芬克斯猫",
+    "sphinx":     "斯芬克斯猫",
+    "斯芬克斯猫":  "斯芬克斯猫",
+    "无毛猫":      "斯芬克斯猫",
+    "singapura":  "新加坡猫",
+    "新加坡猫":    "新加坡猫",
+    "pallas":     "兔狲",
+    "pallas cat": "兔狲",
+    "兔狲":        "兔狲",
+    # 其他动物
+    "dog":        "dog",
+    "狗":          "dog",
+    "小狗":        "dog",
+    "bird":       "bird",
+    "鸟":          "bird",
+    "chicken":    "bird",  # COCO 只能确认 bird，不能做鸡的细分类
+    "鸡":          "bird",
+    "小鸡":        "bird",
+    "cat":        "cat",      # 通用猫，不指定品种
+    "猫":          "cat",
+    "animal":     "animal",
+    "动物":        "animal",
+    "宠物":        "animal",
     # 常见 ASR 听错映射（Whisper 容易把某些品种听成别的词）
     "prison":     "波斯猫",   # Persian → prison
     "version":    "波斯猫",   # Persian → version
@@ -33,40 +51,72 @@ BREED_KEYWORDS: dict[str, str] = {
     "rag doll":   "布偶猫",   # Ragdoll
 }
 
+UNSUPPORTED_BREED_KEYWORDS = {
+    "siamese": "暹罗猫",
+    "暹罗猫": "暹罗猫",
+    "side me's": "暹罗猫",
+    "siam knees": "暹罗猫",
+    "maine coon": "缅因猫",
+    "main coon": "缅因猫",
+    "mancoon": "缅因猫",
+    "main cool": "缅因猫",
+    "缅因猫": "缅因猫",
+    "bengal": "孟加拉猫",
+    "ben gal": "孟加拉猫",
+    "bengle": "孟加拉猫",
+    "孟加拉猫": "孟加拉猫",
+}
+
 ZONE_KEYWORDS: dict[str, str] = {
     "zone a":     "zoneA",
+    "area a":     "zoneA",
     "zonea":      "zoneA",
     "a区":        "zoneA",
     "a zone":     "zoneA",
     "zone b":     "zoneB",
+    "area b":     "zoneB",
     "zoneb":      "zoneB",
     "b区":        "zoneB",
     "b zone":     "zoneB",
     "zone c":     "zoneC",
+    "area c":     "zoneC",
     "zonec":      "zoneC",
     "c区":        "zoneC",
     "c zone":     "zoneC",
     "zone d":     "zoneD",
+    "area d":     "zoneD",
     "zoned":      "zoneD",
     "d区":        "zoneD",
     "d zone":     "zoneD",
     "zone e":     "zoneE",
+    "area e":     "zoneE",
     "zonee":      "zoneE",
     "e区":        "zoneE",
     "e zone":     "zoneE",
     "zone f":     "zoneF",
+    "area f":     "zoneF",
     "zonef":      "zoneF",
     "f区":        "zoneF",
     "f zone":     "zoneF",
     "zone g":     "zoneG",
+    "area g":     "zoneG",
     "zoneg":      "zoneG",
     "g区":        "zoneG",
     "g zone":     "zoneG",
     "zone h":     "zoneH",
+    "area h":     "zoneH",
     "zoneh":      "zoneH",
     "h区":        "zoneH",
     "h zone":     "zoneH",
     "茶水间":     "zoneH",
+    "tea room":   "zoneH",
+    "猫爬架":     "zoneA",  "纸箱": "zoneB",  "窗台": "zoneC",
+    "书架":       "zoneD",  "沙发": "zoneE",  "桌底": "zoneF",
+    "盆栽":       "zoneG",
+    "cat tree":   "zoneA",  "cardboard box": "zoneB",
+    "windowsill": "zoneC",  "window": "zoneC",
+    "bookshelf":  "zoneD",  "sofa": "zoneE", "couch": "zoneE",
+    "under the table": "zoneF", "potted plant": "zoneG",
     "start":      "start",
     "起点":       "start",
     "junction 1": "junc1",
@@ -75,16 +125,53 @@ ZONE_KEYWORDS: dict[str, str] = {
 
 # ---- 手动驾驶指令 → 映射到 keyboard key ----
 MANUAL_KEYWORDS: dict[str, tuple[str, str]] = {
-    # (action, key)
+    # (action, key) — 长关键词在前，避免"左转座"被"左转"抢先
+    # 机械臂（长关键词优先）
+    "左转座":   ("down", "q"),  "右转座": ("down", "e"),
+    "基座左转": ("down", "q"),  "基座右转": ("down", "e"),
+    "turn base left": ("down", "q"), "turn base right": ("down", "e"),
+    "放下机械臂": ("down", "r"), "降低机械臂": ("down", "r"),
+    "抬起机械臂": ("down", "f"), "升起机械臂": ("down", "f"),
+    "机械臂往下放": ("down", "r"), "手臂往下放": ("down", "r"),
+    "机械臂往上抬": ("down", "f"), "手臂往上抬": ("down", "f"),
+    "降臂":     ("down", "r"),  "落臂": ("down", "r"),
+    "抬臂":     ("down", "f"),  "升臂": ("down", "f"),
+    "lower arm": ("down", "r"), "raise arm": ("down", "f"),
+    "伸出机械臂": ("down", "t"), "收回机械臂": ("down", "g"),
+    "伸臂":     ("down", "t"),  "收臂": ("down", "g"),
+    "extend arm": ("down", "t"), "retract arm": ("down", "g"),
+    "切换夹爪": ("down", "space"), "打开夹爪": ("down", "space"),
+    "闭合夹爪": ("down", "space"), "松爪": ("down", "space"),
+    "张开爪子": ("down", "space"), "打开爪子": ("down", "space"),
+    "闭合爪子": ("down", "space"), "抓紧爪子": ("down", "space"),
+    "张开": ("down", "space"),
+    "open gripper": ("down", "space"), "close gripper": ("down", "space"),
+    "机械臂归位": ("down", "z"), "arm home": ("down", "z"),
+    "归位":     ("down", "z"),  "回正": ("down", "z"),
+    "机械臂演示": ("down", "p"), "arm demo": ("down", "p"),
+    "演示":     ("down", "p"),
+    # 移动
     "向前":     ("down", "w"),  "前进": ("down", "w"),  "直走": ("down", "w"),
+    "直行":     ("down", "w"),
     "后退":     ("down", "s"),  "倒车": ("down", "s"),
-    "左转":     ("down", "a"),
-    "右转":     ("down", "d"),
-    "停":       ("down", "x"),  "停止": ("down", "x"),  "停下": ("down", "x"),
-    "加速":     ("down", "3"),  "快点": ("down", "3"),  "快一点": ("down", "3"),
-    "减速":     ("down", "1"),  "慢点": ("down", "1"),  "慢一点": ("down", "1"),
+    "左转":     ("down", "a"),  "右转": ("down", "d"),
+    "停止":     ("down", "x"),  "停下": ("down", "x"),  "停": ("down", "x"),
+    "move forward": ("down", "w"), "forward": ("down", "w"),
+    "move backward": ("down", "s"), "backward": ("down", "s"),
+    "turn left": ("down", "a"), "turn right": ("down", "d"),
+    "stop": ("down", "x"),
+    # 速度
+    "快一点":   ("down", "3"),  "慢一点": ("down", "1"),
+    "加速":     ("down", "3"),  "快点": ("down", "3"),
+    "减速":     ("down", "1"),  "慢点": ("down", "1"),
     "中速":     ("down", "2"),  "正常": ("down", "2"),
+    # 短词
+    "抓":       ("down", "space"),
 }
+
+EXACT_MANUAL_KEYWORDS = {"抓", "张开", "归位", "回正", "演示"}
+MAX_DISTANCE_CM = 1000
+MAX_TURN_DEG = 360
 
 ACTION_KEYWORDS: dict[str, List[str]] = {
     # 陪玩
@@ -114,39 +201,145 @@ ACTION_KEYWORDS: dict[str, List[str]] = {
     "return":    ["return"],
     "回去":      ["return"],
     "回来":      ["return"],
+    "回到起点":  ["return"],
+    "返回起点":  ["return"],
 }
+
+
+def _chinese_number(value: str) -> int:
+    """Convert common command-sized Chinese numerals (0-9999) to an integer."""
+    digits = {"零": 0, "〇": 0, "一": 1, "二": 2, "两": 2, "三": 3, "四": 4,
+              "五": 5, "六": 6, "七": 7, "八": 8, "九": 9}
+    units = {"十": 10, "百": 100, "千": 1000}
+    if all(char in digits for char in value):
+        return int("".join(str(digits[char]) for char in value))
+    total = 0
+    current = 0
+    for char in value:
+        if char in digits:
+            current = digits[char]
+        elif char in units:
+            total += (current or 1) * units[char]
+            current = 0
+    return total + current
+
+
+def is_safe_voice_command(text: str, command: dict) -> bool:
+    """Reject partially matched continuous-motion voice transcripts."""
+    key = command.get("manual_key")
+    if key not in {"w", "a", "s", "d"}:
+        return True
+
+    normalized = text.lower().strip("，。！？,.!? ")
+    normalized = re.sub(
+        r"^(?:请|请你|麻烦|机器人|小车|please|could you|can you)\s*",
+        "",
+        normalized,
+    )
+    normalized = re.sub(r"\s*(?:一下|一点|吧|please)\s*$", "", normalized)
+    safe_forms = {
+        "w": {"向前", "向前走", "前进", "往前", "往前走", "直走", "直行",
+              "move forward", "forward", "go straight"},
+        "s": {"后退", "往后", "往后走", "倒车", "move backward", "backward"},
+        "a": {"左转", "turn left"},
+        "d": {"右转", "turn right"},
+    }
+    return normalized in safe_forms[key]
 
 
 def _parse_keyword(text: str) -> dict:
     """关键词匹配解析。返回字段: breed, zone, actions, distance_cm, turn_deg, manual_key, manual_action。"""
-    import re
-    text_lower = text.lower()
+    text_lower = re.sub(r"\s+", " ", text.lower()).strip()
+    text_lower = re.sub(r"([a-h])\s*区", r"\1区", text_lower)
+    for wrong, correct in {
+        "悬正": "旋转",
+        "旋正": "旋转",
+        "悬转": "旋转",
+        "三百六十": "360",
+        "一百八十": "180",
+        "九十": "90",
+        "四十五": "45",
+    }.items():
+        text_lower = text_lower.replace(wrong, correct)
+    text_lower = re.sub(r"(360|180|90|45)\s*分\b", r"\1度", text_lower)
+
+    for keyword, name in UNSUPPORTED_BREED_KEYWORDS.items():
+        if keyword in text_lower:
+            raise ValueError(
+                f"The current vision model does not support {name}. "
+                "Use Persian, Ragdoll, Sphynx, Singapura, Pallas cat, or any cat."
+            )
 
     # ---- 移动距离：向前/前进/后退 + 数字 + cm/米（数字优先于手动） ----
     distance_cm = None
     move_dir = None
-    m = re.search(r'(向前|前进|往前|forward|后退|往后|backward)\D*(\d+)\s*(cm|厘米|米|m)?', text_lower)
+    number_pattern = r"(\d+|[零〇一二两三四五六七八九十百千]+)"
+    m = re.search(
+        rf'(向前|前进|往前|直行|直走|forward|go straight|后退|往后|backward)'
+        rf'(?:走|移动|开|\s|大约|约)*{number_pattern}\s*(cm|厘米|公分|米|m)?',
+        text_lower,
+    )
     if m:
         dir_word, num_str, unit = m.group(1), m.group(2), m.group(3) or "cm"
-        num = int(num_str) if num_str else 0
+        num = int(num_str) if num_str.isdigit() else _chinese_number(num_str)
         if unit in ("米", "m"):
             num *= 100
         distance_cm = num if num > 0 else 30  # 默认 30cm
-        move_dir = "forward" if dir_word in ("向前", "前进", "往前", "forward") else "backward"
+        if distance_cm > MAX_DISTANCE_CM:
+            raise ValueError(
+                f"Movement distance must be between 1 and {MAX_DISTANCE_CM} cm."
+            )
+        move_dir = "forward" if dir_word in (
+            "向前", "前进", "往前", "直行", "直走", "forward", "go straight",
+        ) else "backward"
 
     # ---- 转弯：左转/右转 + 数字 + 度 ----
     turn_deg = None
     turn_dir = None
-    m = re.search(r'(左转|右转|turn left|turn right|left|right)\s*(\d+)\s*度?', text_lower)
+    m = re.search(
+        r'(左转|右转|turn left|turn right|left|right)\s*(\d+)\s*(?:度|degrees?|deg)?',
+        text_lower,
+    )
     if m:
         dir_word, num = m.group(1), int(m.group(2))
         turn_deg = num
+        if turn_deg > MAX_TURN_DEG:
+            raise ValueError(
+                f"Turn angle must be between 1 and {MAX_TURN_DEG} degrees."
+            )
         turn_dir = "left" if dir_word in ("左转", "turn left", "left") else "right"
+    else:
+        # 未指定方向的“旋转/转一圈”统一按右转执行。
+        m = re.search(
+            r"(?:旋转|rotate(?:\s+around)?)(?:\D*?)(\d+)\s*(?:度|degrees?|deg)?",
+            text_lower,
+        )
+        if m:
+            turn_deg = int(m.group(1))
+            if turn_deg > MAX_TURN_DEG:
+                raise ValueError(
+                    f"Turn angle must be between 1 and {MAX_TURN_DEG} degrees."
+                )
+            turn_dir = "right"
+        elif re.search(r"(?:转|旋转)\s*(?:一圈|1圈)", text_lower):
+            turn_deg = 360
+            turn_dir = "right"
+        elif re.search(r"\b360\s*度", text_lower):
+            # 360° 不依赖左右方向；即使动词被 ASR 听错，也可安全归一为转一圈。
+            turn_deg = 360
+            turn_dir = "right"
 
     # ---- 手动驾驶指令（纯关键词，不带数字） ----
     for keyword, (action, key) in MANUAL_KEYWORDS.items():
-        # 只匹配纯指令，不匹配"向前200cm"这种带数字的
-        if re.search(re.escape(keyword) + r'(?!\s*\d)', text_lower):
+        if distance_cm is not None or turn_deg is not None:
+            break
+        if keyword in EXACT_MANUAL_KEYWORDS:
+            matched = text_lower.strip("，。！？,.!? ") == keyword
+        elif keyword.isascii():
+            matched = bool(re.search(rf"\b{re.escape(keyword)}\b", text_lower))
+        else:
+            matched = keyword in text_lower
+        if matched:
             return {"breed": None, "zone": None, "actions": [],
                     "distance_cm": None, "turn_deg": None,
                     "manual_key": key, "manual_action": action}
@@ -177,67 +370,73 @@ def _parse_keyword(text: str) -> dict:
                     actions.append(a)
 
     # ---- 判定指令类型 ----
+    _base = {"manual_key": None, "manual_action": None}
     if "return" in actions:
-        return {"breed": None, "zone": None, "actions": ["return"],
+        return {**_base, "breed": None, "zone": None, "actions": ["return"],
                 "distance_cm": None, "turn_deg": None}
 
     if distance_cm is not None:
-        return {"breed": breed, "zone": zone, "actions": [move_dir],
+        return {**_base, "breed": breed, "zone": zone, "actions": [move_dir],
                 "distance_cm": distance_cm, "turn_deg": None}
 
     if turn_deg is not None:
-        return {"breed": breed, "zone": zone, "actions": [f"turn_{turn_dir}"],
+        return {**_base, "breed": breed, "zone": zone, "actions": [f"turn_{turn_dir}"],
                 "distance_cm": None, "turn_deg": turn_deg}
 
-    if go_only and zone:
-        # "去A区" → 导航到A区，不找猫
-        return {"breed": None, "zone": zone, "actions": [],
+    if go_only and zone and breed is None:
+        return {**_base, "breed": None, "zone": zone, "actions": [],
                 "distance_cm": None, "turn_deg": None}
 
-    # 默认：找猫模式（breed/zone/actions 可为空）
-    return {"breed": breed, "zone": zone, "actions": actions,
+    return {**_base, "breed": breed, "zone": zone, "actions": actions,
             "distance_cm": None, "turn_deg": None}
 
 
-def parse_command(text: str) -> dict:
-    """将自然语言文字解析为结构化指令。
-    LLM 优先（如果已配置），关键词兜底。"""
-    kw = _parse_keyword(text)  # 关键词总是先算好
+def parse_command(text: str, allow_llm: bool = True) -> dict:
+    """关键词精确匹配优先；复杂自然语言用 LLM 兜底。"""
+    kw = _parse_keyword(text)
 
-    try:
-        from .llm_parser import parse_with_llm
-        llm = parse_with_llm(text)
-        if llm:
-            # 关键词有手动指令 → 优先（LLM 可能猜错"左转"为 turn_deg）
-            if kw.get("manual_key"):
-                return kw
-            # LLM 有手动指令 → 直接用
-            if llm.get("manual_key"):
-                return llm
-            # 合并：LLM 为主，关键词补漏
-            for field in ("breed", "zone", "distance_cm", "turn_deg"):
-                if not llm.get(field) and kw.get(field):
-                    llm[field] = kw[field]
-            for a in kw.get("actions", []):
-                if a not in llm.get("actions", []):
-                    llm["actions"].append(a)
-            return llm
-    except Exception:
-        pass
+    # 关键词已经有明确结果 → 直接返回
+    if kw.get("manual_key") or kw.get("distance_cm") or kw.get("turn_deg") or kw.get("breed"):
+        return {**kw, "parser_source": "rules"}
+    if "return" in kw.get("actions", []):
+        return {**kw, "parser_source": "rules"}
+    if kw.get("zone") and not kw.get("breed"):
+        # "去A区" → 只有 zone 没 breed，关键词已够
+        return {**kw, "parser_source": "rules"}
 
-    # 有效性检查
-    valid = (
-        kw.get("breed") or
-        "return" in kw.get("actions", []) or
-        kw.get("distance_cm") or
-        kw.get("turn_deg") or
-        kw.get("manual_key") or
-        (kw.get("zone") and not kw.get("breed"))
+    # 关键词没招了 → 试 LLM。ASR 候选筛选阶段会显式关闭 LLM，避免错误外语拖慢解析。
+    if allow_llm:
+        try:
+            from .llm_parser import parse_with_llm
+            llm = parse_with_llm(text)
+            if llm:
+                result = {
+                    "breed": llm.get("breed") or kw.get("breed"),
+                    "zone": llm.get("zone") or kw.get("zone"),
+                    "actions": list(dict.fromkeys(llm.get("actions", []) + kw.get("actions", []))),
+                    "distance_cm": llm.get("distance_cm") or kw.get("distance_cm"),
+                    "turn_deg": llm.get("turn_deg") or kw.get("turn_deg"),
+                    "manual_key": llm.get("manual_key"),
+                    "manual_action": llm.get("manual_action"),
+                    "parser_source": "llm",
+                }
+                # 清洗：有 breed 时去掉 return
+                if result["breed"] and "return" in result["actions"]:
+                    result["actions"] = [a for a in result["actions"] if a != "return"]
+                if any((
+                    result["breed"],
+                    result["zone"],
+                    result["actions"],
+                    result["distance_cm"],
+                    result["turn_deg"],
+                    result["manual_key"],
+                )):
+                    return result
+        except Exception:
+            pass
+
+    # 什么都没识别
+    raise ValueError(
+        f"Unable to parse \"{text}\". Try: forward / stop / go to zone A / "
+        "find Persian / forward 200 cm"
     )
-    if not valid:
-        raise ValueError(
-            f"无法解析指令: \"{text}\"\n"
-            f"  试试: 去A区 / 向前 / 向前200cm / 左转90度 / 找波斯猫 / 停"
-        )
-
-    return kw
