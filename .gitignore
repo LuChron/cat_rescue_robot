@@ -1,4 +1,37 @@
+# Python
 __pycache__/
 *.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# Models (large files — get from cat_vision_pipeline)
+models/
+
+# Audio recordings
 *.wav
+command.wav
+
+# Environment
 .env
+*.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Runtime artifacts
+captures/
+photos/
+asr_evaluation/
+outputs/
+
+# pytest
+.pytest_cache/

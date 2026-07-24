@@ -643,6 +643,9 @@ class NavigationController:
                     found_name = BREED_DISPLAY_NAMES.get(found_breed, found_breed)
                     self._log(f"[SEARCHING] Vision match: {found_name} "
                               f"(cls={det.get('classification_confidence', 0):.2f})")
+                    # 视觉伺服：把目标移到画面中央
+                    if motor.is_connected():
+                        self._center_on_target(det)
                     break
 
                 if not motor.is_connected():
@@ -671,6 +674,45 @@ class NavigationController:
                 self._set(nav_state="FAILED", mode="failed")
             else:
                 self._set(nav_state="TURNING")
+
+    def _center_on_target(self, det: dict, max_iter: int = 8, tolerance: float = 0.15):
+        """视觉伺服：左右转向把检测框移到画面中央。"""
+        motor = get_motor()
+        if not det.get("box") or not motor.is_connected():
+            return
+
+        frame_w = det.get("frame_width", 640)
+        x1, _, x2, _ = det["box"]
+        box_cx = (x1 + x2) / 2.0
+        offset = (box_cx - frame_w / 2) / frame_w  # -0.5(左) 到 +0.5(右)
+
+        if abs(offset) < tolerance:
+            return  # 已经在中央
+
+        self._log(f"[SERVO] Centering target (offset={offset:.2f})")
+        for i in range(max_iter):
+            # 按偏差比例转动
+            turn_time = abs(offset) * 1.2  # 偏差大转得久
+            if offset > 0:
+                motor.start_turn_right()
+            else:
+                motor.start_turn_left()
+            time.sleep(min(turn_time, 0.5))
+            motor.stop()
+            time.sleep(0.3)
+
+            # 重新检测位置
+            det2 = get_latest_detection()
+            if not det2 or not det2.get("box"):
+                continue
+            x1, _, x2, _ = det2["box"]
+            box_cx = (x1 + x2) / 2.0
+            offset = (box_cx - frame_w / 2) / frame_w
+            self._log(f"[SERVO] Iter {i+1}: offset={offset:.3f}")
+            if abs(offset) < tolerance:
+                self._log("[SERVO] Target centered ✓")
+                return
+        self._log(f"[SERVO] Centering complete (final offset={offset:.3f})")
 
     def _detection_matches(self, det: dict, target_breed: str) -> bool:
         """判断视觉检测是否满足目标。"""

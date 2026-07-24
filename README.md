@@ -220,3 +220,21 @@ The report includes exact transcript accuracy, final command semantic accuracy,
 and mean inference latency.
 
 猫检测需要 `catvision` conda 环境（含 ultralytics, torch, torchvision）。
+
+## 部署
+
+```bash
+git clone <repo-url>
+cd final_project
+
+# 模型文件从 cat_vision_pipeline 软链接
+ln -s ../cat_vision_pipeline/models models
+
+# 安装依赖
+conda create -n catvision python=3.11
+conda activate catvision
+pip install -r requirements.txt
+
+# 启动
+MAP_NAME=map_full python -m src.server
+```

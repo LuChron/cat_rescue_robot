@@ -174,38 +174,15 @@ class MotorController:
             return self._simulate_drive("forward", distance_cm, cancel_event)
 
         self._log(f"[MOTOR] 前进 {distance_cm}cm (速度{speed})")
-
-        # 先试 step 指令（精确，需 Pi 补丁）
-        self._send_step(f"w {speed} {distance_cm}")
-        time.sleep(0.5)
-
-        # 0.5s 后检测车是否真的在动
-        with self._state_lock:
-            moving = self.state.motion in ("forward", "backward")
-
-        if not moving:
-            # 回退：hold 模式 + 计时（和 key_sender 一样）
-            self._log("[MOTOR] step 未生效，用 hold 模式...")
-            self._send_key("down", str(speed))
-            time.sleep(0.05)
-            self._send_raw("mode hold")
-            time.sleep(0.1)
-            self._send_key("down", "w")
-            if self._wait_cancelable(distance_cm / 45.0, cancel_event):
-                self.stop()
-                self._send_raw("mode step")
-                return False
-            self._send_key("down", "x")
-            time.sleep(0.15)
-            self._send_raw("mode step")
-            time.sleep(0.1)
-        else:
-            if not self._wait_motion_idle(
-                timeout=distance_cm * 0.15 + 5,
-                cancel_event=cancel_event,
-            ):
-                return False
-
+        # 新版 Pi 协议：config step 设参数，down w 触发
+        self._send_raw(f"config step {speed} {distance_cm}")
+        time.sleep(0.1)
+        self._send_key("down", "w")
+        if not self._wait_motion_idle(
+            timeout=distance_cm * 0.15 + 5,
+            cancel_event=cancel_event,
+        ):
+            return False
         self._request_status()
         return True
 
@@ -223,33 +200,14 @@ class MotorController:
             return self._simulate_drive("backward", distance_cm, cancel_event)
 
         self._log(f"[MOTOR] 后退 {distance_cm}cm (速度{speed})")
-        self._send_step(f"s {speed} {distance_cm}")
-        time.sleep(0.5)
-
-        with self._state_lock:
-            moving = self.state.motion in ("forward", "backward")
-        if not moving:
-            self._log("[MOTOR] step 未生效，用 hold 模式...")
-            self._send_key("down", str(speed))
-            time.sleep(0.05)
-            self._send_raw("mode hold")
-            time.sleep(0.1)
-            self._send_key("down", "s")
-            if self._wait_cancelable(distance_cm / 45.0, cancel_event):
-                self.stop()
-                self._send_raw("mode step")
-                return False
-            self._send_key("down", "x")
-            time.sleep(0.15)
-            self._send_raw("mode step")
-            time.sleep(0.1)
-        else:
-            if not self._wait_motion_idle(
-                timeout=distance_cm * 0.15 + 5,
-                cancel_event=cancel_event,
-            ):
-                return False
-
+        self._send_raw(f"config step {speed} {distance_cm}")
+        time.sleep(0.1)
+        self._send_key("down", "s")
+        if not self._wait_motion_idle(
+            timeout=distance_cm * 0.15 + 5,
+            cancel_event=cancel_event,
+        ):
+            return False
         self._request_status()
         return True
 
@@ -366,7 +324,7 @@ class MotorController:
         self._send_raw(f"step {cmd}")
 
     def _request_status(self):
-        self._send_step("status")
+        self._send_raw("raw status")
 
     def _reader_loop(self):
         """后台读取树莓派发来的 JSON 状态。"""
