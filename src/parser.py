@@ -18,6 +18,11 @@ BREED_KEYWORDS: dict[str, str] = {
     "sphinx":     "斯芬克斯猫",
     "斯芬克斯猫":  "斯芬克斯猫",
     "无毛猫":      "斯芬克斯猫",
+    "singapore cat": "新加坡猫",
+    "singaporean cat": "新加坡猫",
+    "singpo cat":  "新加坡猫",
+    "singapo cat": "新加坡猫",
+    "singapore":  "新加坡猫",
     "singapura":  "新加坡猫",
     "新加坡猫":    "新加坡猫",
     "pallas":     "兔狲",
@@ -70,41 +75,49 @@ UNSUPPORTED_BREED_KEYWORDS = {
 ZONE_KEYWORDS: dict[str, str] = {
     "zone a":     "zoneA",
     "area a":     "zoneA",
+    "point a":    "zoneA",
     "zonea":      "zoneA",
     "a区":        "zoneA",
     "a zone":     "zoneA",
     "zone b":     "zoneB",
     "area b":     "zoneB",
+    "point b":    "zoneB",
     "zoneb":      "zoneB",
     "b区":        "zoneB",
     "b zone":     "zoneB",
     "zone c":     "zoneC",
     "area c":     "zoneC",
+    "point c":    "zoneC",
     "zonec":      "zoneC",
     "c区":        "zoneC",
     "c zone":     "zoneC",
     "zone d":     "zoneD",
     "area d":     "zoneD",
+    "point d":    "zoneD",
     "zoned":      "zoneD",
     "d区":        "zoneD",
     "d zone":     "zoneD",
     "zone e":     "zoneE",
     "area e":     "zoneE",
+    "point e":    "zoneE",
     "zonee":      "zoneE",
     "e区":        "zoneE",
     "e zone":     "zoneE",
     "zone f":     "zoneF",
     "area f":     "zoneF",
+    "point f":    "zoneF",
     "zonef":      "zoneF",
     "f区":        "zoneF",
     "f zone":     "zoneF",
     "zone g":     "zoneG",
     "area g":     "zoneG",
+    "point g":    "zoneG",
     "zoneg":      "zoneG",
     "g区":        "zoneG",
     "g zone":     "zoneG",
     "zone h":     "zoneH",
     "area h":     "zoneH",
+    "point h":    "zoneH",
     "zoneh":      "zoneH",
     "h区":        "zoneH",
     "h zone":     "zoneH",
@@ -175,6 +188,10 @@ MAX_TURN_DEG = 360
 
 ACTION_KEYWORDS: dict[str, List[str]] = {
     # 陪玩
+    "interact with it":      ["play"],
+    "interact with the cat": ["play"],
+    "play with it":          ["play"],
+    "play with the cat":     ["play"],
     "play":      ["play"],
     "玩":        ["play"],
     "逗":        ["play"],
@@ -248,8 +265,24 @@ def is_safe_voice_command(text: str, command: dict) -> bool:
 
 
 def _parse_keyword(text: str) -> dict:
-    """关键词匹配解析。返回字段: breed, zone, actions, distance_cm, turn_deg, manual_key, manual_action。"""
+    """关键词匹配解析，包括导航、手动控制和预设节点暂停。"""
     text_lower = re.sub(r"\s+", " ", text.lower()).strip()
+    # Accept mixed Chinese/English breed names produced by bilingual speech,
+    # e.g. "新加坡 cat", before the generic "cat" keyword is matched.
+    text_lower = re.sub(r"新加坡\s*(?:cat|猫)", "新加坡猫", text_lower)
+    junction_number_words = {
+        "one": "1", "won": "1",
+        "two": "2", "to": "2", "too": "2",
+        "three": "3", "tree": "3",
+        "four": "4", "for": "4",
+        "five": "5",
+    }
+    text_lower = re.sub(
+        r"\bju(?:n)?ction\s*(one|won|two|to|too|three|tree|four|for|five)\b",
+        lambda match: f"junction {junction_number_words[match.group(1)]}",
+        text_lower,
+    )
+    text_lower = re.sub(r"\bju(?:n)?ction\s*([1-9])\b", r"junction \1", text_lower)
     text_lower = re.sub(r"([a-h])\s*区", r"\1区", text_lower)
     for wrong, correct in {
         "悬正": "旋转",
@@ -262,6 +295,39 @@ def _parse_keyword(text: str) -> dict:
     }.items():
         text_lower = text_lower.replace(wrong, correct)
     text_lower = re.sub(r"(360|180|90|45)\s*分\b", r"\1度", text_lower)
+
+    # ---- 持久暂停控制 ----
+    continue_text = text_lower.strip("，。！？,.!? ")
+    if continue_text in {
+        "continue", "continue mission", "resume", "resume mission",
+        "继续", "继续任务", "继续走", "恢复任务",
+    }:
+        return {
+            "breed": None, "zone": None, "actions": [],
+            "distance_cm": None, "turn_deg": None,
+            "manual_key": None, "manual_action": None,
+            "control_action": "continue", "pause_node": None,
+        }
+
+    pause_node = None
+    english_pause = re.search(
+        r"\b(?:stop|pause)\s+(?:at\s+)?junction\s+([1-9])\b",
+        text_lower,
+    )
+    chinese_pause = re.search(
+        r"(?:停在|暂停在|到|在)\s*(?:路口|交叉点)\s*([一二三四五六七八九1-9])"
+        r"(?:\s*(?:停下|停止|暂停))?",
+        text_lower,
+    )
+    if english_pause:
+        pause_node = f"junc{english_pause.group(1)}"
+    elif chinese_pause and re.search(r"停|暂停", text_lower):
+        number = chinese_pause.group(1)
+        chinese_digits = {
+            "一": 1, "二": 2, "三": 3, "四": 4, "五": 5,
+            "六": 6, "七": 7, "八": 8, "九": 9,
+        }
+        pause_node = f"junc{chinese_digits.get(number, int(number) if number.isdigit() else 0)}"
 
     for keyword, name in UNSUPPORTED_BREED_KEYWORDS.items():
         if keyword in text_lower:
@@ -333,6 +399,8 @@ def _parse_keyword(text: str) -> dict:
     for keyword, (action, key) in MANUAL_KEYWORDS.items():
         if distance_cm is not None or turn_deg is not None:
             break
+        if pause_node and key == "x":
+            continue
         if keyword in EXACT_MANUAL_KEYWORDS:
             matched = text_lower.strip("，。！？,.!? ") == keyword
         elif keyword.isascii():
@@ -342,7 +410,8 @@ def _parse_keyword(text: str) -> dict:
         if matched:
             return {"breed": None, "zone": None, "actions": [],
                     "distance_cm": None, "turn_deg": None,
-                    "manual_key": key, "manual_action": action}
+                    "manual_key": key, "manual_action": action,
+                    "control_action": None, "pause_node": pause_node}
 
     # ---- 匹配品种 ----
     breed = None
@@ -357,6 +426,9 @@ def _parse_keyword(text: str) -> dict:
         if keyword in text_lower:
             zone = node_id
             break
+    # A junction named only by the pause clause is not the mission destination.
+    if pause_node and zone == pause_node:
+        zone = None
 
     # 去/到/前往 + 区域 → 只导航不找猫
     go_only = bool(re.search(r'(去|到|前往|go to|go\s+)\s*(' + '|'.join(re.escape(k) for k in ZONE_KEYWORDS) + r')', text_lower))
@@ -370,7 +442,31 @@ def _parse_keyword(text: str) -> dict:
                     actions.append(a)
 
     # ---- 判定指令类型 ----
-    _base = {"manual_key": None, "manual_action": None}
+    _base = {
+        "manual_key": None,
+        "manual_action": None,
+        "control_action": None,
+        "pause_node": pause_node,
+    }
+
+    # “stop at junction 1”只登记当前任务的预设停车点，不创建新任务。
+    if (
+        pause_node
+        and breed is None
+        and not actions
+        and distance_cm is None
+        and turn_deg is None
+        and zone in {None, pause_node}
+    ):
+        return {
+            **_base,
+            "breed": None,
+            "zone": None,
+            "actions": [],
+            "distance_cm": None,
+            "turn_deg": None,
+            "control_action": "pause_at",
+        }
     if "return" in actions:
         return {**_base, "breed": None, "zone": None, "actions": ["return"],
                 "distance_cm": None, "turn_deg": None}
@@ -396,7 +492,14 @@ def parse_command(text: str, allow_llm: bool = True) -> dict:
     kw = _parse_keyword(text)
 
     # 关键词已经有明确结果 → 直接返回
-    if kw.get("manual_key") or kw.get("distance_cm") or kw.get("turn_deg") or kw.get("breed"):
+    if (
+        kw.get("control_action")
+        or kw.get("pause_node")
+        or kw.get("manual_key")
+        or kw.get("distance_cm")
+        or kw.get("turn_deg")
+        or kw.get("breed")
+    ):
         return {**kw, "parser_source": "rules"}
     if "return" in kw.get("actions", []):
         return {**kw, "parser_source": "rules"}
@@ -418,6 +521,8 @@ def parse_command(text: str, allow_llm: bool = True) -> dict:
                     "turn_deg": llm.get("turn_deg") or kw.get("turn_deg"),
                     "manual_key": llm.get("manual_key"),
                     "manual_action": llm.get("manual_action"),
+                    "control_action": kw.get("control_action"),
+                    "pause_node": kw.get("pause_node"),
                     "parser_source": "llm",
                 }
                 # 清洗：有 breed 时去掉 return

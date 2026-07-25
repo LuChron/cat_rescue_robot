@@ -88,6 +88,12 @@ def _submit_mission(ctrl: NavigationController, cmd: dict, text: str) -> bool:
     with _mission_submit_lock:
         if ctrl.is_busy():
             return False
+        target = cmd.get("zone") or cmd.get("breed") or "direct command"
+        pause_node = cmd.get("pause_node")
+        ctrl.log(
+            f"[MISSION] Accepted target={target}"
+            + (f", stop_at={pause_node}" if pause_node else "")
+        )
         ctrl.set_mode("running")
         thread = threading.Thread(
             target=ctrl.execute_mission, args=(cmd, text), daemon=True
@@ -98,6 +104,22 @@ def _submit_mission(ctrl: NavigationController, cmd: dict, text: str) -> bool:
             ctrl.set_mode("idle")
             raise
     return True
+
+
+def _apply_navigation_control(
+    ctrl: NavigationController,
+    cmd: dict,
+) -> tuple[bool, str]:
+    """Apply pause-at/continue without replacing the active mission."""
+    action = cmd.get("control_action")
+    if action == "pause_at":
+        node_id = cmd.get("pause_node")
+        if not node_id:
+            return False, "No junction was specified"
+        return ctrl.request_pause_at(node_id)
+    if action == "continue":
+        return ctrl.continue_mission()
+    return False, "Unsupported navigation control"
 
 
 # ---- 确保地图已加载 ----
@@ -155,6 +177,12 @@ def api_command():
     except ValueError as e:
         return jsonify({"ok": False, "error": str(e)}), 400
 
+    if cmd.get("control_action"):
+        ok, error = _apply_navigation_control(ctrl, cmd)
+        if not ok:
+            return jsonify({"ok": False, "error": error, "command": cmd}), 409
+        return jsonify({"ok": True, "command": cmd})
+
     # 手动驾驶指令（停/向前/左转等）无论是否 busy 都立即执行
     if cmd.get("manual_key"):
         ctrl.log(f"[MANUAL] Command: {text}")
@@ -173,6 +201,29 @@ def api_command():
         return jsonify({"ok": False, "error": "A mission is already running"}), 409
 
     return jsonify({"ok": True, "command": cmd})
+
+
+@app.post("/api/interaction")
+def api_interaction():
+    """确认或跳过找到动物后的护理动作。"""
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({"ok": False, "error": "invalid JSON payload"}), 400
+
+    decision = str(payload.get("decision", "")).strip().lower()
+    if decision not in {"execute", "skip"}:
+        return jsonify({
+            "ok": False,
+            "error": "decision must be 'execute' or 'skip'",
+        }), 400
+
+    accepted = _get_ctrl().resolve_interaction(decision == "execute")
+    if not accepted:
+        return jsonify({
+            "ok": False,
+            "error": "No interaction is waiting for confirmation",
+        }), 409
+    return jsonify({"ok": True, "decision": decision})
 
 
 @app.get("/api/camera/stream")
@@ -250,6 +301,7 @@ def api_voice_stop():
         normalize_command_transcript,
         transcript_preview,
         ASR_MIN_LOG_PROB,
+        voice_command_min_log_prob,
     )
 
     if not is_recording():
@@ -339,7 +391,10 @@ def api_voice_stop():
 
         valid_candidates = [
             item for item in candidates
-            if item["command"] is not None and item["avg_logprob"] >= ASR_MIN_LOG_PROB
+            if (
+                item["command"] is not None
+                and item["avg_logprob"] >= voice_command_min_log_prob(item["command"])
+            )
         ]
         if valid_candidates:
             best = max(
@@ -347,6 +402,8 @@ def api_voice_stop():
                 key=lambda item: (
                     item["avg_logprob"]
                     + (0.15 * item["language_probability"] if item["language"] == "auto" else 0)
+                    + (0.25 if item["command"].get("pause_node") else 0)
+                    + (0.15 if item["command"].get("control_action") else 0)
                 ),
             )
             cmd = best["command"]
@@ -400,7 +457,8 @@ def api_voice_stop():
     if cmd is None:
         best_candidate = max(candidates, key=lambda item: item["avg_logprob"])
         confidence = best_candidate["avg_logprob"]
-        if confidence < ASR_MIN_LOG_PROB:
+        confidence_threshold = voice_command_min_log_prob(best_candidate["command"])
+        if confidence < confidence_threshold:
             error = (
                 f"Low speech confidence ({confidence:.2f}). "
                 "Move closer to the microphone and speak once."
@@ -417,6 +475,22 @@ def api_voice_stop():
         }), 400
 
     ctrl.log(f"[VOICE] Heard: {text}")
+    if cmd.get("control_action"):
+        ok, error = _apply_navigation_control(ctrl, cmd)
+        if not ok:
+            ctrl.log(f"[VOICE] Navigation control rejected: {error}")
+            return jsonify({
+                "ok": False,
+                "error": error,
+                "transcript": text,
+                "command": cmd,
+            }), 409
+        return jsonify({
+            "ok": True,
+            "transcript": text,
+            "command": cmd,
+        })
+
     if cmd.get("manual_key"):
         ctrl.log(f"[MANUAL] Voice command: {text}")
         ctrl.cancel_mission(

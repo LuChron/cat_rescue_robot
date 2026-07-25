@@ -21,6 +21,16 @@ PIPELINE_CONFIDENCE = float(os.environ.get("VISION_CONFIDENCE", "0.25"))
 DETECTION_INTERVAL = float(os.environ.get("VISION_INTERVAL", "0.25"))
 DETECTION_TTL = float(os.environ.get("VISION_RESULT_TTL", "1.5"))
 STABLE_FRAMES = int(os.environ.get("VISION_STABLE_FRAMES", "2"))
+BEACON_MIN_AREA = float(os.environ.get("BEACON_MIN_AREA", "50"))
+BEACON_MIN_CONFIDENCE = float(
+    os.environ.get("BEACON_MIN_CONFIDENCE", "0.60")
+)
+BEACON_MIN_RED_DOMINANCE = float(
+    os.environ.get("BEACON_MIN_RED_DOMINANCE", "0.45")
+)
+BEACON_RESULT_TTL = max(
+    0.0, float(os.environ.get("BEACON_RESULT_TTL", "0.60"))
+)
 
 # COCO class IDs: 14=bird, 15=cat, 16=dog. COCO 只能识别 bird，不能确认一定是鸡。
 ANIMAL_CLASSES = {15: "cat", 16: "dog", 14: "bird"}
@@ -87,6 +97,10 @@ def _init_detector():
 _frame = None
 _frame_lock = threading.Lock()
 _latest_detection: dict | None = None  # {breed, classification_confidence, detection_confidence, detector, box}
+_latest_beacon: dict | None = None     # {offset, area, box}
+_latest_beacon_at = 0.0
+_beacon_active = False
+_beacon_lock = threading.Lock()
 _latest_detection_at: float = 0.0
 _detection_signature: str | None = None
 _detection_streak: int = 0
@@ -128,6 +142,7 @@ def _open_capture(source) -> cv2.VideoCapture | None:
 
 def _capture_loop(source, stop_event: threading.Event):
     global _frame, _running, _cat_status, _cat_status_msg
+    global _latest_beacon, _latest_beacon_at
     cap = _open_capture(source)
     if cap is None:
         print(f"[CAMERA] 无可用摄像头")
@@ -169,6 +184,29 @@ def _capture_loop(source, stop_event: threading.Event):
             stop_event.wait(0.1)
             continue
         read_failed_at = None
+
+        # 红点仅在导航完成粗转向后的短暂校准阶段启用。
+        with _beacon_lock:
+            beacon_active = _beacon_active
+        if beacon_active:
+            try:
+                beacon = detect_red_beacon(frame)
+            except Exception:
+                beacon = None
+            with _beacon_lock:
+                if _beacon_active:
+                    if beacon:
+                        observed_at = time.monotonic()
+                        beacon = beacon.copy()
+                        beacon["observed_at"] = observed_at
+                        _latest_beacon = beacon
+                        _latest_beacon_at = observed_at
+                    elif (
+                        time.monotonic() - _latest_beacon_at
+                        > BEACON_RESULT_TTL
+                    ):
+                        _latest_beacon = None
+                        _latest_beacon_at = 0.0
 
         now = time.monotonic()
         if (
@@ -281,6 +319,92 @@ def _detect_and_classify(frame, smoother):
     return pred
 
 
+# ---- 红色信标检测（视觉转弯辅助） ----
+
+def detect_red_beacon(frame) -> dict | None:
+    """检测高纯度红色信标，过滤肤色等低置信度红色区域。"""
+    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    # HSV 红色跨越色相首尾，需要合并两段。
+    # 较高的饱和度下限会先排除大部分肤色。
+    mask1 = cv2.inRange(hsv, (0, 140, 100), (10, 255, 255))
+    mask2 = cv2.inRange(hsv, (170, 140, 100), (180, 255, 255))
+    mask = cv2.bitwise_or(mask1, mask2)
+    mask = cv2.erode(mask, None, iterations=2)
+    mask = cv2.dilate(mask, None, iterations=2)
+    contours, _ = cv2.findContours(
+        mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+    )
+    if not contours:
+        return None
+
+    largest = max(contours, key=cv2.contourArea)
+    area = cv2.contourArea(largest)
+    if area < BEACON_MIN_AREA:
+        return None
+
+    x, y, w, h = cv2.boundingRect(largest)
+    contour_mask = mask.copy()
+    contour_mask[:] = 0
+    cv2.drawContours(contour_mask, [largest], -1, 255, thickness=-1)
+    pixels = contour_mask > 0
+    if not pixels.any():
+        return None
+
+    fill_ratio = min(1.0, area / max(1.0, float(w * h)))
+    mean_saturation = float(hsv[:, :, 1][pixels].mean()) / 255.0
+    mean_bgr = frame[pixels].mean(axis=0)
+    blue, green, red = (float(value) for value in mean_bgr)
+    red_dominance = max(0.0, red - max(green, blue)) / max(1.0, red)
+    if red_dominance < BEACON_MIN_RED_DOMINANCE:
+        return None
+    perimeter = cv2.arcLength(largest, True)
+    circularity = (
+        min(1.0, 4.0 * 3.141592653589793 * area / (perimeter * perimeter))
+        if perimeter > 0
+        else 0.0
+    )
+    confidence = (
+        0.35 * fill_ratio
+        + 0.30 * mean_saturation
+        + 0.30 * red_dominance
+        + 0.05 * circularity
+    )
+    if confidence < BEACON_MIN_CONFIDENCE:
+        return None
+
+    # 地面上的圆点会因为透视变成扁椭圆；使用轮廓重心比外接框中心
+    # 更能稳定表示它相对画面左右边界的位置。
+    moments = cv2.moments(largest)
+    cx = (
+        float(moments["m10"] / moments["m00"])
+        if moments["m00"]
+        else x + w / 2
+    )
+    offset = (cx - frame.shape[1] / 2) / frame.shape[1]
+
+    cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 0, 255), 2)
+    cv2.circle(frame, (int(cx), int(y + h / 2)), 4, (0, 0, 255), -1)
+    cv2.putText(
+        frame,
+        f"BEACON {confidence:.2f} / {offset:.2f}",
+        (x, max(y - 8, 15)),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.5,
+        (0, 0, 255),
+        2,
+    )
+    return {
+        "offset": offset,
+        "area": area,
+        "confidence": confidence,
+        "center_x": cx,
+        "frame_width": frame.shape[1],
+        "left_distance": cx,
+        "right_distance": frame.shape[1] - cx,
+        "box": [x, y, x + w, y + h],
+    }
+
+
 def _clear_detection_locked():
     global _latest_detection, _latest_detection_at
     global _detection_signature, _detection_streak
@@ -390,6 +514,16 @@ def set_inference_paused(paused: bool):
     _inference_paused = bool(paused)
 
 
+def set_beacon_active(active: bool):
+    """只在粗转向完成后的校准窗口启用红点检测。"""
+    global _beacon_active, _latest_beacon, _latest_beacon_at
+    with _beacon_lock:
+        _beacon_active = bool(active)
+        # 开关阶段都清空，防止使用转弯前的旧检测结果。
+        _latest_beacon = None
+        _latest_beacon_at = 0.0
+
+
 def get_frame() -> bytes | None:
     """返回最新 JPEG 帧，无数据返回 None。"""
     with _frame_lock:
@@ -415,6 +549,17 @@ def get_cat_status() -> dict:
             status = "no_cat"
             message = "No animal detected"
         return {"status": status, "message": message, "detection": det}
+
+
+def get_latest_beacon() -> dict | None:
+    """返回最新红色信标，供控制器进行转向校准。"""
+    with _beacon_lock:
+        fresh = (
+            _beacon_active
+            and _latest_beacon is not None
+            and time.monotonic() - _latest_beacon_at <= BEACON_RESULT_TTL
+        )
+        return _latest_beacon.copy() if fresh else None
 
 
 def reset_detection():

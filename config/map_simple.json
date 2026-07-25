@@ -10,6 +10,10 @@
     {"from": "start", "to": "junc2", "dist_cm": 20},
     {"from": "junc2", "to": "junc1", "dist_cm": 20},
     {"from": "junc1", "to": "zoneA", "dist_cm": 30},
-    {"from": "zoneA", "to": "zoneB", "dist_cm": 50}
-  ]
+    {"from": "zoneA", "to": "zoneB", "dist_cm": 30}
+  ],
+  "simulated_animals": {
+    "zoneA": {"species": "cat", "breed": "布偶猫", "label": "布偶猫"},
+    "zoneB": {"species": "cat", "breed": "新加坡猫", "label": "新加坡猫"}
+  }
 }

@@ -1,36 +1,37 @@
 {
   "nodes": {
-    "start":  {"label": "起点/充电站",    "x": 300, "y": 350, "type": "start"},
-    "junc1":  {"label": "北走廊口",       "x": 100, "y": 100, "type": "junction"},
-    "junc2":  {"label": "东走廊口",       "x": 500, "y": 100, "type": "junction"},
-    "junc3":  {"label": "中央大厅",       "x": 300, "y": 200, "type": "junction"},
-    "junc4":  {"label": "西走廊",         "x": 100, "y": 300, "type": "junction"},
-    "junc5":  {"label": "东侧楼梯口",     "x": 500, "y": 300, "type": "junction"},
-    "zoneA":  {"label": "A区/猫爬架区",   "x":   0, "y":   0, "type": "cat_zone"},
-    "zoneB":  {"label": "B区/纸箱区",     "x": 300, "y":   0, "type": "cat_zone"},
-    "zoneC":  {"label": "C区/窗台区",     "x": 600, "y":   0, "type": "cat_zone"},
-    "zoneD":  {"label": "D区/书架顶",     "x": 600, "y": 200, "type": "cat_zone"},
-    "zoneE":  {"label": "E区/沙发区",     "x":   0, "y": 200, "type": "cat_zone"},
-    "zoneF":  {"label": "F区/桌底区",     "x":   0, "y": 450, "type": "cat_zone"},
-    "zoneG":  {"label": "G区/盆栽区",     "x": 600, "y": 450, "type": "cat_zone"},
-    "zoneH":  {"label": "H区/茶水间",     "x": 300, "y": 500, "type": "cat_zone"}
+    "zoneA": {"label": "Point A", "x": 0,  "y": 0,   "type": "cat_zone"},
+    "zoneB": {"label": "Point B", "x": 40, "y": 0,   "type": "cat_zone"},
+    "zoneC": {"label": "Point C", "x": 80, "y": 0,   "type": "cat_zone"},
+    "zoneE": {"label": "Point E", "x": 0,  "y": 40,  "type": "cat_zone"},
+    "junc2": {"label": "Junction 2", "x": 40, "y": 40, "type": "junction"},
+    "zoneD": {"label": "Point D", "x": 80, "y": 40,  "type": "cat_zone"},
+    "junc1": {"label": "Junction 1", "x": 0,  "y": 80,  "type": "junction"},
+    "start": {"label": "Start", "x": 40, "y": 80,  "type": "start"},
+    "zoneG": {"label": "Point G", "x": 0,  "y": 120, "type": "cat_zone"},
+    "zoneF": {"label": "Point F", "x": 40, "y": 120, "type": "cat_zone"}
   },
   "edges": [
-    {"from": "start",  "to": "junc3", "dist_cm": 150},
-    {"from": "start",  "to": "zoneH", "dist_cm": 150},
-    {"from": "start",  "to": "junc4", "dist_cm": 200},
-    {"from": "junc3",  "to": "junc1", "dist_cm": 100},
-    {"from": "junc3",  "to": "junc2", "dist_cm": 200},
-    {"from": "junc3",  "to": "junc4", "dist_cm": 200},
-    {"from": "junc3",  "to": "junc5", "dist_cm": 200},
-    {"from": "junc1",  "to": "zoneA", "dist_cm": 120},
-    {"from": "junc1",  "to": "zoneB", "dist_cm": 200},
-    {"from": "junc2",  "to": "zoneB", "dist_cm": 200},
-    {"from": "junc2",  "to": "zoneC", "dist_cm": 120},
-    {"from": "junc2",  "to": "zoneD", "dist_cm": 100},
-    {"from": "junc4",  "to": "zoneE", "dist_cm": 120},
-    {"from": "junc4",  "to": "zoneF", "dist_cm": 150},
-    {"from": "junc5",  "to": "zoneD", "dist_cm": 100},
-    {"from": "junc5",  "to": "zoneG", "dist_cm": 150}
-  ]
+    {"from": "zoneA", "to": "zoneB", "dist_cm": 40},
+    {"from": "zoneB", "to": "zoneC", "dist_cm": 40},
+    {"from": "zoneA", "to": "zoneE", "dist_cm": 40},
+    {"from": "zoneE", "to": "junc1", "dist_cm": 40},
+    {"from": "junc1", "to": "start", "dist_cm": 40},
+    {"from": "start", "to": "zoneG", "dist_cm": 56.57},
+    {"from": "start", "to": "zoneF", "dist_cm": 40},
+    {"from": "zoneB", "to": "junc2", "dist_cm": 40},
+    {"from": "junc2", "to": "start", "dist_cm": 40},
+    {"from": "junc2", "to": "zoneD", "dist_cm": 40},
+    {"from": "zoneA", "to": "junc2", "dist_cm": 50},
+    {"from": "zoneC", "to": "junc2", "dist_cm": 50}
+  ],
+  "simulated_animals": {
+    "zoneA": {"species": "cat", "breed": "波斯猫", "label": "Persian"},
+    "zoneB": {"species": "cat", "breed": "布偶猫", "label": "Ragdoll"},
+    "zoneC": {"species": "cat", "breed": "斯芬克斯猫", "label": "Sphynx"},
+    "zoneD": {"species": "cat", "breed": "新加坡猫", "label": "Singapura"},
+    "zoneE": {"species": "cat", "breed": "兔狲", "label": "Pallas cat"},
+    "zoneG": {"species": "bird", "breed": "bird", "label": "Chicken"},
+    "zoneF": {"species": "dog", "breed": "dog", "label": "Dog"}
+  }
 }

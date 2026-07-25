@@ -37,6 +37,10 @@ ASR_COMPUTE_TYPE = os.environ.get(
 )
 ASR_CPU_THREADS = int(os.environ.get("ASR_CPU_THREADS", str(min(4, os.cpu_count() or 1))))
 ASR_MIN_LOG_PROB = float(os.environ.get("ASR_MIN_LOG_PROB", "-0.65"))
+ASR_NAV_MIN_LOG_PROB = float(os.environ.get("ASR_NAV_MIN_LOG_PROB", "-1.05"))
+ASR_CONTROL_MIN_LOG_PROB = float(
+    os.environ.get("ASR_CONTROL_MIN_LOG_PROB", "-1.50")
+)
 
 _model = None
 _model_lock = threading.Lock()
@@ -48,20 +52,30 @@ _ZH_PROMPT = (
     "找狗, 找鸟, 去A区, 去B区, 去C区, 去茶水间, 喂食, 拍照, 陪玩, 安抚, "
     "向前走十厘米，向前走二十厘米，后退十厘米，向前走10 cm，后退20 cm，"
     "向前，后退，左转九十度，右转九十度，停止，旋转三百六十度，转一圈，"
+    "在路口一停下，在路口二停下，继续，继续任务，"
     "抬起机械臂，放下机械臂，打开夹爪，归位。"
 )
 _EN_PROMPT = (
-    "English robot commands: find cat, find Persian, find Ragdoll, go to zone C, "
-    "feed, photo, move forward, move backward, turn left, turn right, rotate 360 degrees, "
+    "English robot commands: find cat, find Persian, find Ragdoll, go to zone C, go to point C, "
+    "go to zone A and stop at junction one, go to point A and stop at junction one, "
+    "go to point A, stop at junction one, find the cat and feed it, "
+    "find the Singapura cat and interact with it, interact with it, play with the cat, "
+    "feed, play, photo, move forward, move backward, turn left, turn right, rotate 360 degrees, "
+    "stop at junction one, stop at junction two, continue, resume mission, "
     "stop, raise arm, lower arm, extend arm, retract arm, open gripper, arm home."
 )
 _ZH_HOTWORDS = (
     "向前 后退 厘米 米 十厘米 二十厘米 三十厘米 五十厘米 "
-    "左转 右转 九十度 一百八十度 三百六十度 停止 机械臂 夹爪"
+    "左转 右转 九十度 一百八十度 三百六十度 停止 路口一 路口二 继续 机械臂 夹爪"
 )
 _EN_HOTWORDS = (
     "forward backward centimeters meters turn left turn right "
-    "90 degrees 180 degrees 360 degrees stop robot arm gripper"
+    "90 degrees 180 degrees 360 degrees point A point B point C point D "
+    "point E point F point G point H go to zone A and stop at junction one "
+    "go to point A stop at junction one find the cat feed it "
+    "find the Singapura cat interact with it play with the cat "
+    "stop at junction one stop at junction two "
+    "continue resume robot arm gripper"
 )
 
 # ---- 手动停止录音状态 ----
@@ -294,6 +308,29 @@ def normalize_command_transcript(text: str) -> str:
     return text
 
 
+def voice_command_min_log_prob(command: dict | None) -> float:
+    """Return a command-specific ASR confidence threshold.
+
+    A one-word continue/resume command naturally receives a lower Whisper
+    average log probability than a full sentence. It is still safe to accept
+    more liberally because the controller only applies it while a mission is
+    already paused.
+    """
+    if command and command.get("control_action") == "continue":
+        return ASR_CONTROL_MIN_LOG_PROB
+    if (
+        command
+        and command.get("zone")
+        and not command.get("breed")
+        and not command.get("actions")
+        and not command.get("distance_cm")
+        and not command.get("turn_deg")
+        and not command.get("manual_key")
+    ):
+        return ASR_NAV_MIN_LOG_PROB
+    return ASR_MIN_LOG_PROB
+
+
 def warmup_model():
     """后台预加载模型，避免第一次停止录音时才等待模型加载。"""
     _get_model()
@@ -306,6 +343,8 @@ def get_asr_config() -> dict:
         "compute_type": ASR_COMPUTE_TYPE,
         "primary_language": ASR_PRIMARY_LANGUAGE or "auto",
         "min_log_prob": ASR_MIN_LOG_PROB,
+        "navigation_min_log_prob": ASR_NAV_MIN_LOG_PROB,
+        "control_min_log_prob": ASR_CONTROL_MIN_LOG_PROB,
         "capture_samplerate": "device default",
     }
 

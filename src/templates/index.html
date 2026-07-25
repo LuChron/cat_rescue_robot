@@ -586,6 +586,66 @@
       transform: translateX(-50%) translateY(0);
     }
 
+    .interaction-backdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 30;
+      display: grid;
+      place-items: center;
+      padding: 20px;
+      background: rgba(2, 6, 9, .78);
+      backdrop-filter: blur(6px);
+    }
+    .interaction-backdrop[hidden] { display: none; }
+    .interaction-dialog {
+      width: min(480px, 100%);
+      border: 1px solid var(--line-2);
+      background: linear-gradient(145deg, #111c24, #081018);
+      box-shadow: 0 28px 80px rgba(0, 0, 0, .5);
+      padding: 24px;
+    }
+    .interaction-dialog span {
+      color: var(--green);
+      font: 800 11px/1 var(--mono);
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+    .interaction-dialog h2 {
+      margin: 10px 0 8px;
+      font-size: 24px;
+    }
+    .interaction-dialog p {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.6;
+    }
+    .interaction-actions {
+      margin-top: 14px;
+      padding: 12px;
+      border: 1px solid var(--line);
+      color: var(--text);
+      font: 700 13px/1.5 var(--mono);
+    }
+    .interaction-buttons {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-top: 20px;
+    }
+    .interaction-buttons button {
+      min-height: 44px;
+      border: 1px solid var(--line-2);
+      background: transparent;
+      color: var(--text);
+      cursor: pointer;
+      font-weight: 900;
+    }
+    .interaction-buttons .confirm {
+      border-color: var(--green);
+      background: var(--green);
+      color: #07100b;
+    }
+
     @media (max-width: 1180px) {
       body { overflow: auto; }
       .app {
@@ -714,6 +774,19 @@
     </section>
   </main>
 
+  <div class="interaction-backdrop" id="interactionPrompt" hidden>
+    <div class="interaction-dialog" role="dialog" aria-modal="true" aria-labelledby="interactionTitle">
+      <span>Animal found</span>
+      <h2 id="interactionTitle">Execute interaction?</h2>
+      <p id="interactionAnimal">The target animal has been found.</p>
+      <div class="interaction-actions" id="interactionActions">No actions</div>
+      <div class="interaction-buttons">
+        <button id="btnSkipInteraction" onclick="decideInteraction('skip')">Skip interaction</button>
+        <button class="confirm" id="btnConfirmInteraction" onclick="decideInteraction('execute')">Confirm &amp; execute</button>
+      </div>
+    </div>
+  </div>
+
   <div class="toast" id="toast"></div>
 
   <script>
@@ -725,6 +798,7 @@
     let refreshing = false;
     let commandSending = false;
     let voiceRequestInFlight = false;
+    let interactionRequestInFlight = false;
     let voiceResult = {
       status: "waiting",
       heard: "No voice command yet",
@@ -772,6 +846,7 @@
       DRIVING: "Driving",
       ARRIVED: "Arrived",
       SEARCHING: "Searching",
+      AWAITING_CONFIRMATION: "Awaiting confirmation",
       SUCCESS: "Detected",
       FAILED: "Failed"
     };
@@ -813,6 +888,10 @@
       if (command.manual_key) return manualLabels[command.manual_key] || "Manual control";
       const parts = [];
       if (command.zone) parts.push(`Go to ${command.zone}`);
+      if (command.pause_node) {
+        const junctionNumber = String(command.pause_node).replace(/^junc/i, "");
+        parts.push(`Stop at junction ${junctionNumber}`);
+      }
       if (command.breed) parts.push(`Find ${breedLabels[command.breed] || command.breed}`);
       if (command.actions?.length) {
         parts.push(command.actions.map(action => actionLabels[action] || action).join(", "));
@@ -949,7 +1028,7 @@
         const found = state.cat_found && state.cat_zone === id;
         const label = n.label || id;
 
-        let r = type === "cat_zone" ? 11 : 6;
+        let r = type === "cat_zone" ? 11 : type === "junction" ? 8 : 6;
         let fill = type === "start" ? "#f2b84b" : type === "cat_zone" ? "#101c25" : "#9aa49b";
         let stroke = type === "cat_zone" ? "#5ee184" : "rgba(238,244,240,.54)";
         if (explored) { fill = "rgba(238,104,95,.85)"; stroke = "#ee685f"; }
@@ -974,10 +1053,13 @@
         ctx.textBaseline = "middle";
         if (type === "cat_zone") ctx.fillText(id.replace("zone", ""), X(id), Y(id));
         if (type === "start") ctx.fillText("S", X(id), Y(id));
+        if (type === "junction") ctx.fillText(id.replace("junc", "J"), X(id), Y(id));
 
         ctx.font = "11px " + getComputedStyle(document.body).fontFamily;
         ctx.textBaseline = "middle";
-        const labelText = type === "cat_zone" ? mapLabels[id] || id : "";
+        const labelText = type === "cat_zone"
+          ? (n.label || mapLabels[id] || id)
+          : "";
         if (!labelText) return;
         const [dx, dy] = [0, -r - 14];
         const metrics = ctx.measureText(labelText);
@@ -996,6 +1078,16 @@
         ctx.fillRect(lx - bw / 2, ly - bh / 2, bw, bh);
         ctx.fillStyle = "rgba(238,244,240,.74)";
         ctx.fillText(labelText, lx, ly + 1);
+
+        const animal = !state.robot_connected
+          ? mapData?.simulated_animals?.[id]
+          : null;
+        if (animal) {
+          const animalName = animal.label || breedLabels[animal.breed] || animal.species;
+          ctx.font = "700 10px " + getComputedStyle(document.body).fontFamily;
+          ctx.fillStyle = "#f2b84b";
+          ctx.fillText(`● ${animalName}`, X(id), Y(id) + r + 18);
+        }
       });
 
       ctx.restore();
@@ -1003,8 +1095,10 @@
 
     function renderStateSteps() {
       const current = state.nav_state || "IDLE";
-      const normalized = ["TURNING", "ARRIVED", "OBSTACLE_WAIT", "REPLANNING", "PAUSED", "STOPPING"].includes(current)
-        ? "DRIVING" : current;
+      const normalized = current === "AWAITING_CONFIRMATION"
+        ? "SUCCESS"
+        : ["TURNING", "ARRIVED", "OBSTACLE_WAIT", "REPLANNING", "PAUSED", "STOPPING"].includes(current)
+          ? "DRIVING" : current;
       const activeIndex = stateOrder.indexOf(normalized);
       document.getElementById("stateSteps").innerHTML = stateOrder.map((id, index) => {
         const cls = index < activeIndex ? "done" : index === activeIndex ? "active" : "";
@@ -1094,6 +1188,23 @@
       document.getElementById("btnVoice").disabled =
         voiceTranscribing || voiceRequestInFlight;
 
+      const interactionPrompt = document.getElementById("interactionPrompt");
+      const interactionPending = !!state.interaction_pending;
+      interactionPrompt.hidden = !interactionPending;
+      if (interactionPending) {
+        const foundRaw = state.cat_breed || state.command?.breed || "animal";
+        const foundName = breedLabels[foundRaw] || foundRaw;
+        const zone = state.cat_zone || state.current_node || "unknown zone";
+        const pendingLabels = (state.pending_actions || [])
+          .map(action => actionLabels[action] || action);
+        document.getElementById("interactionAnimal").textContent =
+          `${foundName} found at ${zone}. Execute the requested interaction actions?`;
+        document.getElementById("interactionActions").textContent =
+          pendingLabels.join(" · ") || "No interaction actions";
+      }
+      document.getElementById("btnSkipInteraction").disabled = interactionRequestInFlight;
+      document.getElementById("btnConfirmInteraction").disabled = interactionRequestInFlight;
+
       renderStateSteps();
       renderVoiceResult();
       drawMap();
@@ -1162,6 +1273,33 @@
       } finally {
         commandSending = false;
         document.getElementById("btnGo").disabled = false;
+      }
+    }
+
+    async function decideInteraction(decision) {
+      if (interactionRequestInFlight) return;
+      interactionRequestInFlight = true;
+      document.getElementById("btnSkipInteraction").disabled = true;
+      document.getElementById("btnConfirmInteraction").disabled = true;
+      try {
+        const response = await fetch("/api/interaction", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ decision })
+        });
+        const data = await response.json();
+        if (!response.ok || !data.ok) {
+          toast(data.error || "Interaction decision failed.");
+          return;
+        }
+        state.interaction_pending = false;
+        document.getElementById("interactionPrompt").hidden = true;
+        toast(decision === "execute" ? "Interaction approved." : "Interaction skipped.");
+        await refresh();
+      } catch {
+        toast("Interaction decision failed.");
+      } finally {
+        interactionRequestInFlight = false;
       }
     }
 
@@ -1256,7 +1394,7 @@
         asrAvailable = false;
       }
       await refresh();
-      setInterval(refresh, 750);
+      setInterval(refresh, 200);
     }
 
     // Manual drive and arm override

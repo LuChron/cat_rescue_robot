@@ -33,8 +33,81 @@ SERIAL_BAUD = int(os.environ.get("ROBOT_SERIAL_BAUD", "9600"))
 
 DEFAULT_SPEED = 2         # 1=慢 2=中 3=快
 TURN_PWM = 180             # 转弯 PWM（Arduino 中等速度）
+# 真车前进距离校准：发送前统一乘以该系数。
+# 例如规划/语音要求 20cm 时，默认发送 raw w 2 16。
+FORWARD_DISTANCE_SCALE = max(
+    0.01, float(os.environ.get("FORWARD_DISTANCE_SCALE", "0.8"))
+)
+SIMULATION_DRIVE_CM_PER_SECOND = float(
+    os.environ.get("SIMULATION_DRIVE_CM_PER_SECOND", "375")
+)
+SIMULATION_MIN_DRIVE_SECONDS = float(
+    os.environ.get("SIMULATION_MIN_DRIVE_SECONDS", "0.16")
+)
+SIMULATION_TURN_SECONDS = float(
+    os.environ.get("SIMULATION_TURN_SECONDS", "0.16")
+)
+CARE_ACTION_TIMEOUT_SECONDS = float(
+    os.environ.get("CARE_ACTION_TIMEOUT_SECONDS", "12")
+)
+ARM_SERVO_SECONDS_PER_DEG = float(
+    os.environ.get("ARM_SERVO_SECONDS_PER_DEG", "0.012")
+)
+ARM_COMMAND_MARGIN_SECONDS = float(
+    os.environ.get("ARM_COMMAND_MARGIN_SECONDS", "0.15")
+)
+FEED_RELEASE_SECONDS = float(
+    os.environ.get("FEED_RELEASE_SECONDS", "0.60")
+)
+HARDWARE_TURN_TIMEOUT_SECONDS = float(
+    os.environ.get("HARDWARE_TURN_TIMEOUT_SECONDS", "12")
+)
+MOTION_SETTLE_SECONDS = max(
+    0.0, float(os.environ.get("MOTION_SETTLE_SECONDS", "0.40"))
+)
 HEADING_TOLERANCE = 15.0   # 航向容差（度）
 OBSTACLE_DISTANCE = 15     # 障碍判定距离（cm）
+
+# Feed starts from the calibrated carrying pose:
+# B70 (unchanged), F45, S150, G0.
+# Lower the first arm by about half of its old 45-degree travel, lower the
+# second arm, then open the gripper near the ground.
+FEED_LOWER_SEQUENCE = (
+    ("F30", 15 * ARM_SERVO_SECONDS_PER_DEG + ARM_COMMAND_MARGIN_SECONDS),
+    ("S90", 20 * ARM_SERVO_SECONDS_PER_DEG + ARM_COMMAND_MARGIN_SECONDS),
+    ("G60", 60 * ARM_SERVO_SECONDS_PER_DEG + ARM_COMMAND_MARGIN_SECONDS),
+)
+FEED_RETURN_SEQUENCE = (
+    ("B70", ARM_COMMAND_MARGIN_SECONDS),
+    ("F45", 15 * ARM_SERVO_SECONDS_PER_DEG + ARM_COMMAND_MARGIN_SECONDS),
+    ("S150", 20 * ARM_SERVO_SECONDS_PER_DEG + ARM_COMMAND_MARGIN_SECONDS),
+    ("G0", 60 * ARM_SERVO_SECONDS_PER_DEG + ARM_COMMAND_MARGIN_SECONDS),
+)
+
+# Gentle cat-play motion around the calibrated home pose B70/F45/S150/G0.
+# The base moves only +/-8 degrees; both arm joints add a small, slow flutter.
+PLAY_ARM_SEQUENCE = (
+    ("B70", ARM_COMMAND_MARGIN_SECONDS),
+    ("F45", ARM_COMMAND_MARGIN_SECONDS),
+    ("S150", ARM_COMMAND_MARGIN_SECONDS),
+    ("G0", ARM_COMMAND_MARGIN_SECONDS),
+    ("B62", 8 * ARM_SERVO_SECONDS_PER_DEG + ARM_COMMAND_MARGIN_SECONDS),
+    ("F42", 3 * ARM_SERVO_SECONDS_PER_DEG + ARM_COMMAND_MARGIN_SECONDS),
+    ("S146", 4 * ARM_SERVO_SECONDS_PER_DEG + ARM_COMMAND_MARGIN_SECONDS),
+    ("B78", 16 * ARM_SERVO_SECONDS_PER_DEG + ARM_COMMAND_MARGIN_SECONDS),
+    ("F48", 6 * ARM_SERVO_SECONDS_PER_DEG + ARM_COMMAND_MARGIN_SECONDS),
+    ("S154", 8 * ARM_SERVO_SECONDS_PER_DEG + ARM_COMMAND_MARGIN_SECONDS),
+    ("B62", 16 * ARM_SERVO_SECONDS_PER_DEG + ARM_COMMAND_MARGIN_SECONDS),
+    ("F42", 6 * ARM_SERVO_SECONDS_PER_DEG + ARM_COMMAND_MARGIN_SECONDS),
+    ("S146", 8 * ARM_SERVO_SECONDS_PER_DEG + ARM_COMMAND_MARGIN_SECONDS),
+    ("B78", 16 * ARM_SERVO_SECONDS_PER_DEG + ARM_COMMAND_MARGIN_SECONDS),
+    ("F48", 6 * ARM_SERVO_SECONDS_PER_DEG + ARM_COMMAND_MARGIN_SECONDS),
+    ("S154", 8 * ARM_SERVO_SECONDS_PER_DEG + ARM_COMMAND_MARGIN_SECONDS),
+    ("B70", 8 * ARM_SERVO_SECONDS_PER_DEG + ARM_COMMAND_MARGIN_SECONDS),
+    ("F45", 3 * ARM_SERVO_SECONDS_PER_DEG + ARM_COMMAND_MARGIN_SECONDS),
+    ("S150", 4 * ARM_SERVO_SECONDS_PER_DEG + ARM_COMMAND_MARGIN_SECONDS),
+    ("G0", ARM_COMMAND_MARGIN_SECONDS),
+)
 
 
 @dataclass
@@ -68,12 +141,20 @@ class MotorController:
         # 共享状态
         self.state = CarState()
         self._state_lock = threading.Lock()
+        self._motion_condition = threading.Condition(self._state_lock)
+        self._motion_completion_override = threading.Event()
+        self._status_version = 0
+        self._last_active_version = 0
+        self._last_active_motion = "idle"
+        self._heading_offset_deg = 0.0
 
         # 上次转向时的航向
         self._turn_start_heading = 0.0
         self._cumulative_turn = 0.0
         self._sim_turn_thread: threading.Thread | None = None
         self._last_manual = 0.0  # 最后一次手动驾驶时间
+        self._care_lock = threading.Lock()
+        self._care_waiters: dict[str, dict] = {}
 
     # ------------------------------------------------------------------
     # 连接管理
@@ -84,6 +165,8 @@ class MotorController:
         if self._sock is not None or self._running:
             self.disconnect()
         self._buffer = ""
+        with self._state_lock:
+            self._heading_offset_deg = 0.0
         try:
             self._sock = socket.create_connection(
                 (self._host, self._port), timeout=5
@@ -146,6 +229,7 @@ class MotorController:
         self._reader_thread = None
         with self._state_lock:
             self.state.connected = False
+        self._fail_pending_care_actions("Robot disconnected")
         print("[MOTOR] 已断开")
 
     def is_connected(self) -> bool:
@@ -168,46 +252,29 @@ class MotorController:
         无补丁时自动回退 hold 模式（key_sender 同款协议）。
         """
         speed = max(1, min(3, speed))
-        distance_cm = max(1, int(distance_cm))
+        requested_distance_cm = max(1, int(round(distance_cm)))
 
         if not self.is_connected():
-            return self._simulate_drive("forward", distance_cm, cancel_event)
+            return self._simulate_drive(
+                "forward", requested_distance_cm, cancel_event
+            )
 
-        self._log(f"[MOTOR] 前进 {distance_cm}cm (速度{speed})")
+        send_distance_cm = max(
+            1,
+            int(round(requested_distance_cm * FORWARD_DISTANCE_SCALE)),
+        )
+        self._log(
+            f"[MOTOR] 前进请求 {requested_distance_cm}cm，"
+            f"校准后发送 {send_distance_cm}cm "
+            f"(系数{FORWARD_DISTANCE_SCALE:g}, 速度{speed})"
+        )
 
-        # 先试 step 指令（精确，需 Pi 补丁）
-        self._send_step(f"w {speed} {distance_cm}")
-        time.sleep(0.5)
-
-        # 0.5s 后检测车是否真的在动
-        with self._state_lock:
-            moving = self.state.motion in ("forward", "backward")
-
-        if not moving:
-            # 回退：hold 模式 + 计时（和 key_sender 一样）
-            self._log("[MOTOR] step 未生效，用 hold 模式...")
-            self._send_key("down", str(speed))
-            time.sleep(0.05)
-            self._send_raw("mode hold")
-            time.sleep(0.1)
-            self._send_key("down", "w")
-            if self._wait_cancelable(distance_cm / 45.0, cancel_event):
-                self.stop()
-                self._send_raw("mode step")
-                return False
-            self._send_key("down", "x")
-            time.sleep(0.15)
-            self._send_raw("mode step")
-            time.sleep(0.1)
-        else:
-            if not self._wait_motion_idle(
-                timeout=distance_cm * 0.15 + 5,
-                cancel_event=cancel_event,
-            ):
-                return False
-
-        self._request_status()
-        return True
+        return self._send_motion_and_wait(
+            f"raw w {speed} {send_distance_cm}",
+            expected_motion="forward",
+            timeout=send_distance_cm * 0.15 + 5,
+            cancel_event=cancel_event,
+        )
 
     def backward(
         self,
@@ -223,35 +290,39 @@ class MotorController:
             return self._simulate_drive("backward", distance_cm, cancel_event)
 
         self._log(f"[MOTOR] 后退 {distance_cm}cm (速度{speed})")
-        self._send_step(f"s {speed} {distance_cm}")
-        time.sleep(0.5)
+        return self._send_motion_and_wait(
+            f"raw s {speed} {distance_cm}",
+            expected_motion="backward",
+            timeout=distance_cm * 0.15 + 5,
+            cancel_event=cancel_event,
+        )
 
-        with self._state_lock:
-            moving = self.state.motion in ("forward", "backward")
-        if not moving:
-            self._log("[MOTOR] step 未生效，用 hold 模式...")
-            self._send_key("down", str(speed))
-            time.sleep(0.05)
-            self._send_raw("mode hold")
-            time.sleep(0.1)
-            self._send_key("down", "s")
-            if self._wait_cancelable(distance_cm / 45.0, cancel_event):
-                self.stop()
-                self._send_raw("mode step")
-                return False
-            self._send_key("down", "x")
-            time.sleep(0.15)
-            self._send_raw("mode step")
-            time.sleep(0.1)
-        else:
-            if not self._wait_motion_idle(
-                timeout=distance_cm * 0.15 + 5,
-                cancel_event=cancel_event,
-            ):
-                return False
+    def turn_degrees(
+        self,
+        direction: str,
+        angle_deg: float,
+        cancel_event: threading.Event | None = None,
+    ) -> bool:
+        """Execute the latest Pi protocol: a+90 / d+45."""
+        direction = direction.strip().lower()
+        if direction not in {"left", "right"}:
+            return False
+        angle = max(1, int(round(angle_deg)))
 
-        self._request_status()
-        return True
+        if not self.is_connected():
+            with self._state_lock:
+                current = self.state.heading_deg
+            target = current + angle if direction == "right" else current - angle
+            return self.simulate_turn_to(target, cancel_event)
+
+        key = "a" if direction == "left" else "d"
+        self._log(f"[MOTOR] {direction} turn {angle} deg")
+        return self._send_motion_and_wait(
+            f"{key}+{angle}",
+            expected_motion="turn_left" if direction == "left" else "turn_right",
+            timeout=max(HARDWARE_TURN_TIMEOUT_SECONDS, angle / 30.0 + 3.0),
+            cancel_event=cancel_event,
+        )
 
     def start_turn_left(self):
         """开始左转（非阻塞）。"""
@@ -277,6 +348,23 @@ class MotorController:
             self._cumulative_turn = 0.0
             self.state.motion = "turn_right"
 
+    def simulate_turn_to(
+        self,
+        heading_deg: float,
+        cancel_event: threading.Event | None = None,
+    ) -> bool:
+        """模拟模式快速转到指定航向；真车模式不调用此方法。"""
+        if self.is_connected():
+            return False
+        target = heading_deg % 360
+        self._log(f"[SIM] turn to {target:.0f} deg ({SIMULATION_TURN_SECONDS:.2f}s)")
+        if self._wait_cancelable(SIMULATION_TURN_SECONDS, cancel_event):
+            return False
+        with self._state_lock:
+            self.state.heading_deg = target
+            self.state.motion = "idle"
+        return True
+
     def stop_turn(self):
         """停止转弯。"""
         with self._state_lock:
@@ -293,9 +381,27 @@ class MotorController:
     # ------------------------------------------------------------------
 
     def get_heading(self) -> float:
-        """当前航向角（度）。"""
+        """返回地图导航使用的校准航向角（度）。"""
         with self._state_lock:
-            return self.state.heading_deg
+            return (
+                self.state.heading_deg + self._heading_offset_deg
+            ) % 360
+
+    def calibrate_heading(self, heading_deg: float) -> bool:
+        """把当前位置的物理车头标定为指定地图航向，不修改树莓派。"""
+        with self._state_lock:
+            if not self.state.connected:
+                return False
+            raw_heading = self.state.heading_deg % 360
+            target_heading = heading_deg % 360
+            self._heading_offset_deg = (
+                target_heading - raw_heading
+            ) % 360
+        self._log(
+            f"[MOTOR] Heading calibrated: raw={raw_heading:.1f} deg, "
+            f"map={target_heading:.1f} deg"
+        )
+        return True
 
     def send_key_event(self, action: str, key: str):
         """手动控制：发送键盘事件到小车。"""
@@ -309,6 +415,69 @@ class MotorController:
         if not self.is_connected():
             return False
         return self._send_key(action, key)
+
+    def confirm_motion_complete(self) -> bool:
+        """人工确认当前分段运动已完成，并唤醒等待树莓派 idle 的线程。"""
+        with self._motion_condition:
+            if not self.state.connected:
+                return False
+            self._motion_completion_override.set()
+            self._motion_condition.notify_all()
+        self._log("[MOTOR] Current motion completion confirmed by operator")
+        return True
+
+    def execute_care_action(
+        self,
+        action: str,
+        timeout: float = CARE_ACTION_TIMEOUT_SECONDS,
+    ) -> bool:
+        """Translate care actions into raw servo commands understood by the Pi."""
+        action = action.strip().lower()
+        if action not in {"feed", "play"}:
+            self._log(f"[CARE] Unsupported hardware action: {action}")
+            return False
+        if not self.is_connected():
+            self._log(f"[CARE] Robot is offline; cannot execute {action}")
+            return False
+
+        started_at = time.monotonic()
+
+        def run_arm_sequence(sequence) -> bool:
+            for command, wait_seconds in sequence:
+                if time.monotonic() - started_at + wait_seconds > max(0.1, timeout):
+                    self._log(
+                        f"[CARE] {action} timed out before completing arm sequence"
+                    )
+                    return False
+                self._log(f"[CARE] {action} -> {command}")
+                if not self._send_raw(f"raw {command}"):
+                    self._log(f"[CARE] Failed to send arm command: {command}")
+                    return False
+                time.sleep(wait_seconds)
+            return True
+
+        if action == "play":
+            if not run_arm_sequence(PLAY_ARM_SEQUENCE):
+                return False
+            self._log(
+                "[CARE] Play complete; arm returned to B70/F45/S150/G0"
+            )
+            return True
+
+        if not run_arm_sequence(FEED_LOWER_SEQUENCE):
+            return False
+
+        if time.monotonic() - started_at + FEED_RELEASE_SECONDS > max(0.1, timeout):
+            self._log("[CARE] feed timed out while releasing the item")
+            return False
+        self._log(f"[CARE] Item released; waiting {FEED_RELEASE_SECONDS:.2f}s")
+        time.sleep(FEED_RELEASE_SECONDS)
+
+        if not run_arm_sequence(FEED_RETURN_SEQUENCE):
+            return False
+
+        self._log("[CARE] Feed complete; arm returned to B70/F45/S150/G0")
+        return True
 
     def manual_active(self, grace: float = 2.0) -> bool:
         """最近 grace 秒内有手动驾驶操作？"""
@@ -366,7 +535,7 @@ class MotorController:
         self._send_raw(f"step {cmd}")
 
     def _request_status(self):
-        self._send_step("status")
+        self._send_raw("raw status")
 
     def _reader_loop(self):
         """后台读取树莓派发来的 JSON 状态。"""
@@ -402,11 +571,12 @@ class MotorController:
         self._running = False
         with self._state_lock:
             self.state.connected = False
+        self._fail_pending_care_actions("Robot connection lost")
 
     def _handle_payload(self, p: dict):
         ptype = p.get("type", "")
         if ptype == "status":
-            with self._state_lock:
+            with self._motion_condition:
                 self.state.mode = p.get("mode", self.state.mode)
                 self.state.speed_level = int(p.get("speed_level", self.state.speed_level))
                 self.state.distance_cm = int(p.get("distance_cm", self.state.distance_cm))
@@ -422,8 +592,106 @@ class MotorController:
                 self.state.heading_deg = float(
                     p.get("heading_deg", self.state.heading_deg)
                 )
+                self._status_version += 1
+                if self.state.motion not in ("idle", "blocked_front"):
+                    self._last_active_version = self._status_version
+                    self._last_active_motion = self.state.motion
+                self._motion_condition.notify_all()
         elif ptype == "log":
             self._log(f"[PI] {p.get('message', '')}")
+        elif ptype in {"care_ack", "care_result"}:
+            request_id = str(p.get("request_id", ""))
+            with self._care_lock:
+                waiter = self._care_waiters.get(request_id)
+                if waiter is None:
+                    return
+                if ptype == "care_result" or not p.get("accepted", False):
+                    waiter["result"] = {
+                        "ok": bool(p.get("ok", False)),
+                        "error": p.get("error"),
+                    }
+                    waiter["event"].set()
+
+    def _fail_pending_care_actions(self, error: str):
+        with self._care_lock:
+            for waiter in self._care_waiters.values():
+                waiter["result"] = {"ok": False, "error": error}
+                waiter["event"].set()
+
+    def _send_motion_and_wait(
+        self,
+        command: str,
+        expected_motion: str,
+        timeout: float,
+        cancel_event: threading.Event | None = None,
+    ) -> bool:
+        """Send one hardware motion command, then wait for the chassis to settle."""
+        with self._motion_condition:
+            start_version = self._status_version
+            self._motion_completion_override.clear()
+
+        if not self._send_raw(command):
+            return False
+
+        deadline = time.monotonic() + max(0.1, timeout)
+        active_version = None
+        motion_completed = False
+        operator_confirmed = False
+        while time.monotonic() < deadline:
+            if cancel_event is not None and cancel_event.is_set():
+                self.stop()
+                return False
+
+            with self._motion_condition:
+                if self._motion_completion_override.is_set():
+                    self._motion_completion_override.clear()
+                    motion_completed = True
+                    operator_confirmed = True
+                    break
+
+                if (
+                    self._last_active_version > start_version
+                    and self._last_active_motion == expected_motion
+                ):
+                    active_version = self._last_active_version
+
+                if (
+                    self._status_version > start_version
+                    and self.state.motion == "blocked_front"
+                ):
+                    self._log(f"[MOTOR] {expected_motion} blocked")
+                    return False
+
+                if (
+                    active_version is not None
+                    and self._status_version > active_version
+                    and self.state.motion == "idle"
+                ):
+                    motion_completed = True
+                    break
+
+                self._motion_condition.wait(timeout=0.05)
+
+        if operator_confirmed:
+            self._log(f"[MOTOR] Operator confirmed completion: {command}")
+
+        if motion_completed:
+            if MOTION_SETTLE_SECONDS > 0:
+                self._log(
+                    f"[MOTOR] Motion complete; settling "
+                    f"{MOTION_SETTLE_SECONDS:.2f}s"
+                )
+                if self._wait_cancelable(MOTION_SETTLE_SECONDS, cancel_event):
+                    return False
+            return True
+
+        self.stop()
+        self._motion_completion_override.clear()
+        if active_version is None:
+            self._log(f"[MOTOR] No acknowledgement for command: {command}")
+        else:
+            self._log(f"[MOTOR] Motion timed out: {command}")
+        return False
 
     def _wait_motion_idle(
         self,
@@ -473,9 +741,12 @@ class MotorController:
         cancel_event: threading.Event | None = None,
     ) -> bool:
         """模拟行驶。"""
-        secs = distance_cm / 50.0  # 假设 50cm/s
+        secs = max(
+            SIMULATION_MIN_DRIVE_SECONDS,
+            distance_cm / SIMULATION_DRIVE_CM_PER_SECOND,
+        )
         self._log(f"[SIM] {direction} {distance_cm:.0f}cm ({secs:.1f}s)")
-        return not self._wait_cancelable(max(0.1, secs), cancel_event)
+        return not self._wait_cancelable(secs, cancel_event)
 
     def _simulate_turn(self, direction: str):
         """模拟转弯——持续更新航向直到外部 stop()。"""

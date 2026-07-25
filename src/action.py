@@ -5,7 +5,10 @@
 """
 
 from datetime import datetime
+import time
 from typing import List
+
+from .motor import get_motor
 
 
 def run_care_actions(breed: str, zone: str, actions: List[str]):
@@ -22,25 +25,27 @@ def run_care_actions(breed: str, zone: str, actions: List[str]):
     _approach()
 
     # ---- 第 3 步：陪玩（如果 actions 包含 play） ----
+    results = {}
     if "play" in actions:
-        _play_with_cat()
+        results["play"] = _play_with_cat()
 
     # ---- 第 4 步：投喂（如果 actions 包含 feed） ----
     if "feed" in actions:
-        _dispense_food()
+        results["feed"] = _dispense_food()
 
     # ---- 第 5 步：语音安抚（如果 actions 包含 talk） ----
     if "talk" in actions:
-        _play_sound()
+        results["talk"] = _play_sound()
 
     # ---- 第 6 步：拍照（如果 actions 包含 photo） ----
     if "photo" in actions:
-        _capture_photo(breed, zone)
+        results["photo"] = _capture_photo(breed, zone)
 
     # ---- 第 7 步：任务报告 ----
-    _report(breed, zone, actions)
+    _report(breed, zone, results)
 
     print(f"{'='*40}\n")
+    return results
 
 
 def _announce(breed: str, zone: str):
@@ -57,21 +62,46 @@ def _approach():
 
 
 def _play_with_cat():
-    """逗猫棒 / 激光笔互动。"""
-    print("[CARE/玩耍] 🎣 激光笔画圈、逗猫棒摆动...")
-    # TODO: 舵机驱动逗猫棒 / GPIO 控制激光笔随机运动
+    """用机械臂小幅左右摆动陪猫玩耍，结束后回到初始姿态。"""
+    motor = get_motor()
+    if not motor.is_connected():
+        print("[CARE/玩耍] 模拟机械臂小幅左右摆动...")
+        time.sleep(0.25)
+        return True
+
+    print("[CARE/玩耍] 机械臂正在小幅左右摆动...")
+    success = motor.execute_care_action("play")
+    print(
+        "[CARE/玩耍] 互动动作完成，机械臂已归位"
+        if success
+        else "[CARE/玩耍] 机械臂互动动作发送失败"
+    )
+    return success
 
 
 def _dispense_food():
     """舵机投放零食。"""
-    print("[CARE/投喂] 🍖 舵机开闸，投放猫零食...")
-    # TODO: RPi.GPIO 控制舵机，打开 → 停留 1s → 关闭
+    motor = get_motor()
+    if not motor.is_connected():
+        print("[CARE/投喂] 模拟开闸，投放猫零食...")
+        time.sleep(0.25)
+        return True
+
+    print("[CARE/投喂] 正在放下机械臂并打开夹爪...")
+    success = motor.execute_care_action("feed")
+    print(
+        "[CARE/投喂] 投喂动作序列完成"
+        if success
+        else "[CARE/投喂] 机械臂动作发送失败"
+    )
+    return success
 
 
 def _play_sound():
     """播放安抚声音 / 猫叫。"""
     print("[CARE/安抚] 🔊 播放咕噜声 / 猫叫吸引注意...")
     # TODO: pygame.mixer / espeak 播放预录音频
+    return True
 
 
 def _capture_photo(breed: str, zone: str):
@@ -80,10 +110,15 @@ def _capture_photo(breed: str, zone: str):
     filename = f"{breed}_{zone}_{timestamp}.jpg"
     print(f"[CARE/拍照] 📸 保存照片: {filename}")
     # TODO: PiCamera / cv2 截图保存
+    return True
 
 
-def _report(breed: str, zone: str, actions: List[str]):
+def _report(breed: str, zone: str, results: dict[str, bool]):
     """任务报告 → Web 控制台。"""
-    action_str = "、".join(actions)
-    msg = f"✅ 互动完成 — 在 {zone} 找到 {breed}，已执行: {action_str}"
+    completed = [action for action, ok in results.items() if ok]
+    failed = [action for action, ok in results.items() if not ok]
+    action_str = "、".join(completed) or "无"
+    msg = f"互动结果 — 在 {zone} 找到 {breed}，已完成: {action_str}"
+    if failed:
+        msg += f"，失败: {'、'.join(failed)}"
     print(f"[CARE/报告] {msg}")
