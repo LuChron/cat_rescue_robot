@@ -68,6 +68,17 @@ BEACON_CENTER_SETTLE_SECONDS = max(
 )
 CARE_ACTION_DISPLAY_DELAY = float(os.environ.get("CARE_ACTION_DISPLAY_DELAY", "0.25"))
 HOME_HEADING_DEGREES = float(os.environ.get("HOME_HEADING_DEGREES", "90"))
+
+# 信标航向校准参数
+BEACON_CALIBRATION_FOV = float(
+    os.environ.get("BEACON_CALIBRATION_FOV", "60")
+)
+BEACON_CALIBRATION_STEP_DEGREES = max(
+    5, min(45, int(os.environ.get("BEACON_CALIBRATION_STEP_DEGREES", "15")))
+)
+BEACON_CALIBRATION_PAUSE_SECONDS = max(
+    0.1, float(os.environ.get("BEACON_CALIBRATION_PAUSE_SECONDS", "0.35"))
+)
 BREED_DISPLAY_NAMES = {
     "波斯猫": "Persian",
     "布偶猫": "Ragdoll",
@@ -443,6 +454,104 @@ class NavigationController:
     # 各状态实现
     # ------------------------------------------------------------------
 
+    def _calibrate_heading_at_node(self, node_id: str) -> bool:
+        """用红色信标确定小车当前航向并校准。
+
+        原地慢速旋转 360°，持续检测画面中的红色信标。
+        检测到后根据信标的已知地图位置反算真实航向，调用
+        motor.calibrate_heading() 完成校准。
+
+        Returns:
+            True 校准成功，False 表示信标未检测到或硬件断连。
+        """
+        node = self.map_data["nodes"].get(node_id, {})
+        beacon_dx = node.get("beacon_dx")
+        beacon_dy = node.get("beacon_dy")
+
+        if beacon_dx is None or beacon_dy is None:
+            self._log(
+                f"[CALIBRATE] No beacon defined at {node_id}; "
+                "using IMU heading"
+            )
+            return False
+
+        motor = get_motor()
+        if not motor.is_connected():
+            self._log("[CALIBRATE] Simulation mode; skipping calibration")
+            return False
+
+        # 计算地图坐标系中从节点到信标的期望方向
+        # 屏幕坐标 Y 向下：atan2(-dy, dx) 即地图航向
+        phi_map = math.degrees(math.atan2(-beacon_dy, beacon_dx)) % 360
+        self._log(
+            f"[CALIBRATE] Scanning for beacon at {node_id} "
+            f"(beacon offset: dx={beacon_dx}, dy={beacon_dy}, "
+            f"expected direction: {phi_map:.1f}°)"
+        )
+
+        set_beacon_active(True)
+        rotated = 0.0
+        try:
+            while rotated < 360.0:
+                if self._cancel_event.is_set():
+                    return False
+
+                # 当前角度停留片刻，等相机产出稳定帧
+                if self._cancel_event.wait(
+                    BEACON_CALIBRATION_PAUSE_SECONDS
+                ):
+                    return False
+
+                beacon = get_latest_beacon()
+                if beacon:
+                    offset = float(beacon.get("offset", 0.0))
+                    # offset ∈ [-0.5, 0.5]；正值 = 信标在画面右侧
+                    alpha = offset * BEACON_CALIBRATION_FOV
+                    true_heading = (phi_map - alpha) % 360
+
+                    self._log(
+                        f"[CALIBRATE] Beacon found: offset={offset:.3f} "
+                        f"→ camera_angle={alpha:.1f}° "
+                        f"→ heading={true_heading:.1f}°"
+                    )
+
+                    if motor.calibrate_heading(true_heading):
+                        verified = motor.get_heading() % 360
+                        self._log(
+                            f"[CALIBRATE] Calibrated: "
+                            f"heading={verified:.1f}°"
+                        )
+                        return True
+                    else:
+                        self._log(
+                            "[CALIBRATE] calibrate_heading() failed"
+                        )
+                        return False
+
+                # 未检测到信标，旋转一步
+                step = min(
+                    BEACON_CALIBRATION_STEP_DEGREES, 360.0 - rotated
+                )
+                if step <= 0:
+                    break
+                if not motor.turn_degrees(
+                    "right", step, cancel_event=self._cancel_event
+                ):
+                    if not self._cancel_event.is_set():
+                        self._log("[CALIBRATE] Scan turn failed")
+                    return False
+                rotated += step
+
+            # 360° 转完仍未检测到
+            self._log(
+                "[CALIBRATE] Beacon not found after full scan; "
+                "using IMU heading"
+            )
+            return False
+        finally:
+            set_beacon_active(False)
+            motor.stop()
+
     def _do_planning(self):
         breed = self._command.get("breed")
         zone = self._command.get("zone")
@@ -580,6 +689,14 @@ class NavigationController:
                 self._pause_node = None
                 self._set(nav_state="FAILED", mode="failed", pause_node=None)
                 return
+
+        # 从非起点位置开始导航时，先用信标校准航向
+        if start_node != "start" and len(waypoints) > 1:
+            self._log(
+                f"[CALIBRATE] Determining heading at {start_node} "
+                "before navigation"
+            )
+            self._calibrate_heading_at_node(start_node)
 
         self._set(
             route=[w["id"] for w in waypoints],

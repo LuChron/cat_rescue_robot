@@ -1,15 +1,15 @@
 {
   "nodes": {
-    "zoneA": {"label": "Point A", "x": 0,  "y": 0,   "type": "cat_zone"},
-    "zoneB": {"label": "Point B", "x": 40, "y": 0,   "type": "cat_zone"},
-    "zoneC": {"label": "Point C", "x": 80, "y": 0,   "type": "cat_zone"},
-    "zoneE": {"label": "Point E", "x": 0,  "y": 40,  "type": "cat_zone"},
-    "junc2": {"label": "Junction 2", "x": 40, "y": 40, "type": "junction"},
-    "zoneD": {"label": "Point D", "x": 80, "y": 40,  "type": "cat_zone"},
-    "junc1": {"label": "Junction 1", "x": 0,  "y": 80,  "type": "junction"},
-    "start": {"label": "Start", "x": 40, "y": 80,  "type": "start"},
-    "zoneG": {"label": "Point G", "x": 0,  "y": 120, "type": "cat_zone"},
-    "zoneF": {"label": "Point F", "x": 40, "y": 120, "type": "cat_zone"}
+    "zoneA": {"label": "Point A", "x": 0,  "y": 0,   "type": "cat_zone", "beacon_dx": 0, "beacon_dy": -20},
+    "zoneB": {"label": "Point B", "x": 40, "y": 0,   "type": "cat_zone", "beacon_dx": 0, "beacon_dy": -20},
+    "zoneC": {"label": "Point C", "x": 80, "y": 0,   "type": "cat_zone", "beacon_dx": 0, "beacon_dy": -20},
+    "zoneE": {"label": "Point E", "x": 0,  "y": 40,  "type": "cat_zone", "beacon_dx": 0, "beacon_dy": -20},
+    "junc2": {"label": "Junction 2", "x": 40, "y": 40, "type": "junction", "beacon_dx": 0, "beacon_dy": -20},
+    "zoneD": {"label": "Point D", "x": 80, "y": 40,  "type": "cat_zone", "beacon_dx": 0, "beacon_dy": -20},
+    "junc1": {"label": "Junction 1", "x": 0,  "y": 80,  "type": "junction", "beacon_dx": 0, "beacon_dy": -20},
+    "start": {"label": "Start", "x": 40, "y": 80,  "type": "start",   "beacon_dx": 0, "beacon_dy": -20},
+    "zoneG": {"label": "Point G", "x": 0,  "y": 120, "type": "cat_zone", "beacon_dx": 0, "beacon_dy": -20},
+    "zoneF": {"label": "Point F", "x": 40, "y": 120, "type": "cat_zone", "beacon_dx": 0, "beacon_dy": -20}
   },
   "edges": [
     {"from": "zoneA", "to": "zoneB", "dist_cm": 40},

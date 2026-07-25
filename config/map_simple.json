@@ -1,10 +1,10 @@
 {
   "nodes": {
-    "start":  {"label": "起点",    "x": 20, "y": 50, "type": "start"},
-    "junc1":  {"label": "路口1",   "x":  0, "y": 30, "type": "junction"},
-    "junc2":  {"label": "路口2",   "x": 20, "y": 30, "type": "junction"},
-    "zoneA":  {"label": "猫A区",   "x":  0, "y":  0, "type": "cat_zone"},
-    "zoneB":  {"label": "猫B区",   "x": 50, "y":  0, "type": "cat_zone"}
+    "start":  {"label": "起点",    "x": 20, "y": 50, "type": "start",    "beacon_dx": 0, "beacon_dy": -20},
+    "junc1":  {"label": "路口1",   "x":  0, "y": 30, "type": "junction", "beacon_dx": 0, "beacon_dy": -20},
+    "junc2":  {"label": "路口2",   "x": 20, "y": 30, "type": "junction", "beacon_dx": 0, "beacon_dy": -20},
+    "zoneA":  {"label": "猫A区",   "x":  0, "y":  0, "type": "cat_zone", "beacon_dx": 0, "beacon_dy": -20},
+    "zoneB":  {"label": "猫B区",   "x": 50, "y":  0, "type": "cat_zone", "beacon_dx": 0, "beacon_dy": -20}
   },
   "edges": [
     {"from": "start", "to": "junc2", "dist_cm": 20},
