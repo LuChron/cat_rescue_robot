@@ -87,6 +87,7 @@ def _init_detector():
 _frame = None
 _frame_lock = threading.Lock()
 _latest_detection: dict | None = None  # {breed, classification_confidence, detection_confidence, detector, box}
+_latest_beacon: dict | None = None     # {offset, area, box}
 _latest_detection_at: float = 0.0
 _detection_signature: str | None = None
 _detection_streak: int = 0
@@ -181,6 +182,10 @@ def _capture_loop(source, stop_event: threading.Event):
                 pred = _detect_and_classify(frame, smoother)
                 with _detection_lock:
                     _update_detection_locked(pred)
+                # 红色信标检测（轻量，每帧都跑）
+                beacon = detect_red_beacon(frame)
+                global _latest_beacon
+                _latest_beacon = beacon
             except Exception as e:
                 with _detection_lock:
                     _cat_status = "error"
@@ -280,6 +285,42 @@ def _detect_and_classify(frame, smoother):
 
     return pred
 
+
+# ---- 红色信标检测（视觉转弯辅助） ----
+
+def detect_red_beacon(frame) -> dict | None:
+    """检测画面中最大的红色色块，返回其归一化水平偏移。"""
+    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    # HSV 红色有两段：0-10 和 170-180
+    mask1 = cv2.inRange(hsv, (0, 70, 70), (10, 255, 255))
+    mask2 = cv2.inRange(hsv, (170, 70, 70), (180, 255, 255))
+    mask = cv2.bitwise_or(mask1, mask2)
+    # 去噪
+    mask = cv2.erode(mask, None, iterations=2)
+    mask = cv2.dilate(mask, None, iterations=2)
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not contours:
+        return None
+
+    largest = max(contours, key=cv2.contourArea)
+    area = cv2.contourArea(largest)
+    if area < 50:  # 太小忽略
+        return None
+
+    x, y, w, h = cv2.boundingRect(largest)
+    cx = x + w / 2
+    offset = (cx - frame.shape[1] / 2) / frame.shape[1]  # -0.5(左) ~ +0.5(右)
+
+    # 画标记
+    cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 0, 255), 2)
+    cv2.circle(frame, (int(cx), int(y + h / 2)), 4, (0, 0, 255), -1)
+    cv2.putText(frame, f"BEACON {offset:.2f}", (x, max(y - 8, 15)),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+
+    return {"offset": offset, "area": area, "box": [x, y, x + w, y + h]}
+
+
+# ---- 内部 ----
 
 def _clear_detection_locked():
     global _latest_detection, _latest_detection_at
@@ -415,6 +456,11 @@ def get_cat_status() -> dict:
             status = "no_cat"
             message = "No animal detected"
         return {"status": status, "message": message, "detection": det}
+
+
+def get_latest_beacon() -> dict | None:
+    """返回最新红色信标，供控制器转弯校准。"""
+    return _latest_beacon
 
 
 def reset_detection():

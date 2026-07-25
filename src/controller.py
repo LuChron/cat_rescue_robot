@@ -12,7 +12,7 @@ from typing import Optional
 
 from .planner import DEFAULT_MAP_PATH, load_map, get_waypoints, get_cat_zones, plan_exploration_route
 from .motor import get_motor, MotorController
-from .camera import get_latest_detection, reset_detection, set_search_active
+from .camera import get_latest_detection, get_latest_beacon, reset_detection, set_search_active
 
 GENERIC_CAT_LABELS = {"cat", "猫"}
 GENERIC_ANIMAL_LABELS = {"animal", "动物", "宠物"}
@@ -436,7 +436,8 @@ class NavigationController:
             motor.start_turn_right()
 
         # 闭环等待航向对准
-        deadline = time.time() + TURN_TIMEOUT
+        turn_start = time.time()
+        deadline = turn_start + TURN_TIMEOUT
         heading_changed = False
         while time.time() < deadline:
             if self._cancel_event.is_set():
@@ -453,6 +454,27 @@ class NavigationController:
                 motor.stop()
                 time.sleep(0.1)
                 break
+            # 红色信标辅助
+            if time.time() - turn_start > 0.3:  # 陀螺先转 0.3s 再查信标
+                beacon = get_latest_beacon()
+                if beacon and abs(beacon["offset"]) > 0.06:
+                    self._log(f"[TURNING] Red beacon lock (offset={beacon['offset']:.3f})")
+                    motor.stop()
+                    # 迭代对准：最多 5 步
+                    for _ in range(5):
+                        beacon = get_latest_beacon()
+                        if not beacon or abs(beacon["offset"]) < 0.06:
+                            self._log("[TURNING] Beacon aligned ✓")
+                            break
+                        if beacon["offset"] > 0:
+                            motor.start_turn_right()
+                        else:
+                            motor.start_turn_left()
+                        time.sleep(abs(beacon["offset"]) * 0.8)
+                        motor.stop()
+                        time.sleep(0.2)
+                    error = 0
+                    break
 
             # heading 不更新 → 回退计时转弯（1.5s 估转 90°）
             if not heading_changed and time.time() > deadline - TURN_TIMEOUT + 1.5:
